@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../models/service.dart';
 import '../../repositories/service_repository.dart';
 import '../../services/price_list_import_service.dart';
 
-/// وارد کردن دستی نرخ‌نامه: کاربر مسیر فایل اکسل را وارد می‌کند، دسته‌بندی مقصد
-/// را انتخاب می‌کند، پیش‌نمایش می‌بیند و سپس تأیید نهایی می‌دهد.
 class PriceListImportScreen extends StatefulWidget {
   const PriceListImportScreen({super.key});
   @override
@@ -57,6 +56,20 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
     }
   }
 
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+    );
+    if (result != null && result.files.single.path != null) {
+      setState(() {
+        _pathCtrl.text = result.files.single.path!;
+        _preview = null;
+        _error = null;
+      });
+    }
+  }
+
   Future<void> _doPreview() async {
     setState(() {
       _error = null;
@@ -106,13 +119,18 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
           child: const Text(
-            'فایل اکسل (xlsx) خود را ابتدا با فایل‌منیجر گوشی به پوشه Documents برنامه منتقل کنید. '
             'فرمت هر ردیف: نام خدمت | برند (اختیاری) | مدل (اختیاری) | قیمت. ردیف اول (سرستون) نادیده گرفته می‌شود.',
             style: TextStyle(fontSize: 12),
           ),
         ),
         const SizedBox(height: 16),
-        TextField(controller: _pathCtrl, decoration: const InputDecoration(labelText: 'مسیر کامل فایل .xlsx')),
+        Row(children: [
+          Expanded(
+            child: TextField(controller: _pathCtrl, decoration: const InputDecoration(labelText: 'فایل انتخاب‌شده'), readOnly: true),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(icon: const Icon(Icons.folder_open), label: const Text('انتخاب فایل'), onPressed: _pickFile),
+        ]),
         const SizedBox(height: 16),
         Row(children: [
           Expanded(
