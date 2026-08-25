@@ -33,6 +33,7 @@ dependencies:
 
   # Excel import (pure-Dart, no native Android code - safe from SDK version conflicts)
   excel: ^4.0.6
+  file_picker: ^9.0.2
 
 dev_dependencies:
   flutter_test:
