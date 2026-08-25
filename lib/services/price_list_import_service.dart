@@ -1,30 +1,18 @@
-}
 import 'dart:io';
 import 'package:excel/excel.dart';
 import '../models/service.dart';
 import '../repositories/service_repository.dart';
 import '../repositories/vehicle_reference_repository.dart';
 
-/// وارد کردن دستی نرخ‌نامه از فایل اکسل. برخلاف نسخه‌ی قبلی، هیچ داده‌ی
-/// از‌پیش‌آماده‌ای وجود ندارد - کاربر خودش فایل و دسته‌بندی مقصد را انتخاب می‌کند.
-///
-/// فرمت مورد انتظار فایل اکسل (شیت اول)، هر ردیف یک خدمت:
-///   ستون A: نام خدمت (الزامی)
-///   ستون B: برند خودرو (اختیاری - خالی یعنی برای همه برندها)
-///   ستون C: مدل خودرو (اختیاری)
-///   ستون D: قیمت (الزامی، فقط عدد)
-/// ردیف اول (سرستون) نادیده گرفته می‌شود.
 class PriceListImportService {
   final _serviceRepo = ServiceRepository();
   final _vehicleRepo = VehicleReferenceRepository();
 
-  /// پیش‌نمایش فایل قبل از وارد کردن نهایی: تعداد ردیف‌های معتبر و چند نمونه.
   Future<List<Map<String, dynamic>>> previewFile(String path) async {
     final rows = _readRows(path);
     return rows.take(10).map((r) => {'name': r.$1, 'brand': r.$2, 'model': r.$3, 'price': r.$4}).toList();
   }
 
-  /// استخراج ایمن مقدار متنی از یک سلول اکسل، صرف‌نظر از نوع داخلی آن (متن/عدد/...).
   String? _cellText(CellValue? cv) {
     if (cv == null) return null;
     final s = cv.toString().trim();
@@ -51,7 +39,6 @@ class PriceListImportService {
     return result;
   }
 
-  /// وارد کردن نهایی. کاربر دسته‌بندی مقصد را مشخص می‌کند (مثلاً «مکانیک» یا «برق خودرو»).
   Future<({int services, int brands})> importFromFile({
     required String path,
     required int categoryId,
