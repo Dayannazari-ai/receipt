@@ -1,3 +1,4 @@
+}
 import 'dart:io';
 import 'package:excel/excel.dart';
 import '../models/service.dart';
@@ -23,6 +24,13 @@ class PriceListImportService {
     return rows.take(10).map((r) => {'name': r.$1, 'brand': r.$2, 'model': r.$3, 'price': r.$4}).toList();
   }
 
+  /// استخراج ایمن مقدار متنی از یک سلول اکسل، صرف‌نظر از نوع داخلی آن (متن/عدد/...).
+  String? _cellText(CellValue? cv) {
+    if (cv == null) return null;
+    final s = cv.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
   List<(String, String?, String?, double)> _readRows(String path) {
     final bytes = File(path).readAsBytesSync();
     final excel = Excel.decodeBytes(bytes);
@@ -31,19 +39,14 @@ class PriceListImportService {
     for (var i = 1; i < sheet.maxRows; i++) {
       final row = sheet.row(i);
       if (row.isEmpty) continue;
-      final name = row.length > 0 ? row[0]?.value?.toString().trim() : null;
+      final name = row.isNotEmpty ? _cellText(row[0]?.value) : null;
       if (name == null || name.isEmpty) continue;
-      final brand = row.length > 1 ? row[1]?.value?.toString().trim() : null;
-      final model = row.length > 2 ? row[2]?.value?.toString().trim() : null;
-      final priceRaw = row.length > 3 ? row[3]?.value : null;
-      double? price;
-      if (priceRaw is num) {
-        price = priceRaw.toDouble();
-      } else if (priceRaw != null) {
-        price = double.tryParse(priceRaw.toString().replaceAll(',', ''));
-      }
+      final brand = row.length > 1 ? _cellText(row[1]?.value) : null;
+      final model = row.length > 2 ? _cellText(row[2]?.value) : null;
+      final priceText = row.length > 3 ? _cellText(row[3]?.value) : null;
+      final price = priceText == null ? null : double.tryParse(priceText.replaceAll(',', ''));
       if (price == null) continue;
-      result.add((name, (brand?.isEmpty ?? true) ? null : brand, (model?.isEmpty ?? true) ? null : model, price));
+      result.add((name, brand, model, price));
     }
     return result;
   }
