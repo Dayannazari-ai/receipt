@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../models/app_settings.dart';
 import '../../models/payment_account.dart';
@@ -86,6 +87,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _pickStampImage() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result != null && result.files.single.path != null) {
+      setState(() => _stampPathCtrl.text = result.files.single.path!);
+    }
+  }
+
   Future<void> _addAccount() async {
     final titleCtrl = TextEditingController();
     final numberCtrl = TextEditingController();
@@ -128,28 +136,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _doRestore() async {
-    final pathCtrl = TextEditingController();
+    final result = await FilePicker.platform.pickFiles(type: FileType.any);
+    if (result == null || result.files.single.path == null) return;
+    final pickedPath = result.files.single.path!;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('بازیابی از فایل پشتیبان'),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('فایل .db را با فایل‌منیجر گوشی به پوشه Documents برنامه منتقل کنید و مسیر آن را وارد کنید.'),
-          const SizedBox(height: 12),
-          TextField(controller: pathCtrl, decoration: const InputDecoration(labelText: 'مسیر فایل .db')),
-          const SizedBox(height: 8),
-          const Text('هشدار: اطلاعات فعلی جایگزین می‌شود.', style: TextStyle(color: Colors.red, fontSize: 12)),
-        ]),
+        content: const Text('هشدار: اطلاعات فعلی با این فایل جایگزین می‌شود و قابل بازگشت نیست. ادامه می‌دهید؟',
+            style: TextStyle(color: Colors.red)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('بازیابی', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
-    if (confirm != true || pathCtrl.text.trim().isEmpty) return;
+    if (confirm != true) return;
     setState(() => _busy = true);
     try {
-      await _backupService.restoreFromPath(pathCtrl.text.trim());
+      await _backupService.restoreFromPath(pickedPath);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('بازیابی انجام شد. برنامه را دوباره باز کنید.')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطا: $e')));
@@ -222,10 +227,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const Text('مهر و امضای کارگاه', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
           const SizedBox(height: 6),
-          const Text('عکس مهر/امضا را با فایل‌منیجر گوشی به پوشه Documents برنامه منتقل کنید و مسیر آن را وارد کنید.',
+          const Text('عکس مهر/امضا را با دکمه زیر مستقیم از فایل‌منیجر گوشی انتخاب کنید.',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
           const SizedBox(height: 10),
-          TextField(controller: _stampPathCtrl, decoration: const InputDecoration(labelText: 'مسیر فایل عکس مهر/امضا')),
+          Row(children: [
+            Expanded(
+              child: TextField(controller: _stampPathCtrl, decoration: const InputDecoration(labelText: 'مسیر فایل عکس مهر/امضا')),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(icon: const Icon(Icons.folder_open), label: const Text('انتخاب'), onPressed: _pickStampImage),
+          ]),
           if (_stampImagePath != null && File(_stampImagePath!).existsSync()) ...[
             const SizedBox(height: 10),
             Image.file(File(_stampImagePath!), height: 80),
