@@ -7,18 +7,18 @@ class InvoiceRepository {
   final _db = DatabaseHelper.instance;
   final _settingsRepo = SettingsRepository();
 
-  /// شماره فاکتور را با پیشوند نوع فاکتور می‌سازد تا خرید/فروش/خدمات از هم
-  /// با یک ممیز قابل تفکیک باشند (مثلاً «خد/۱۰۰۱»، «فک/۱۰۰۱»، «خر/۱۰۰۱»).
+  /// شماره فاکتور با پیشوند انگلیسی نوع فاکتور، با ممیز جدا می‌شود.
+  /// S = خدمات (برق خودرو/مکانیک/جلوبندی), SL = فروش کالا, PR = خرید کالا
   String _prefixFor(InvoiceType type) {
     switch (type) {
       case InvoiceType.electrical:
       case InvoiceType.mechanic:
       case InvoiceType.suspension:
-        return 'خد';
+        return 'S';
       case InvoiceType.productSale:
-        return 'فک';
+        return 'SL';
       case InvoiceType.productPurchase:
-        return 'خر';
+        return 'PR';
     }
   }
 
