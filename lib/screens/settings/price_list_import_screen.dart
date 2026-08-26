@@ -18,6 +18,7 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
   List<ServiceCategory> _categories = [];
   int? _selectedCategoryId;
   List<Map<String, dynamic>>? _preview;
+  int? _totalCount;
   bool _busy = false;
   String? _error;
 
@@ -65,6 +66,7 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
       setState(() {
         _pathCtrl.text = result.files.single.path!;
         _preview = null;
+        _totalCount = null;
         _error = null;
       });
     }
@@ -74,14 +76,20 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
     setState(() {
       _error = null;
       _preview = null;
+      _totalCount = null;
       _busy = true;
     });
     try {
       final preview = await _importService.previewFile(_pathCtrl.text.trim());
+      final total = await _importService.countEntries(_pathCtrl.text.trim());
       if (preview.isEmpty) {
-        setState(() => _error = 'هیچ ردیف معتبری در فایل پیدا نشد. فرمت ستون‌ها را بررسی کنید.');
+        setState(() => _error =
+            'هیچ ردیف معتبری در فایل پیدا نشد. مطمئن شوید سرستون سطر اول شامل کلمه‌ی «خدمات» یا «خدمت» است.');
       } else {
-        setState(() => _preview = preview);
+        setState(() {
+          _preview = preview;
+          _totalCount = total;
+        });
       }
     } catch (e) {
       setState(() => _error = 'خطا در خواندن فایل: $e');
@@ -119,7 +127,9 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
           child: const Text(
-            'فرمت هر ردیف: نام خدمت | برند (اختیاری) | مدل (اختیاری) | قیمت. ردیف اول (سرستون) نادیده گرفته می‌شود.',
+            'فایل اصلی نرخ‌نامه (با برندها در ستون‌ها و خدمات در سطرها، دقیقاً مثل فایل اتحادیه) '
+            'پشتیبانی می‌شود. کافی است ستون نام خدمت در سرستون شامل کلمه‌ی «خدمات» باشد؛ باقی ستون‌های '
+            'قبل از آن به‌عنوان برند در نظر گرفته می‌شوند.',
             style: TextStyle(fontSize: 12),
           ),
         ),
@@ -145,7 +155,7 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
         ]),
         const SizedBox(height: 20),
         ElevatedButton(
-          onPressed: _busy ? null : _doPreview,
+          onPressed: _busy || _pathCtrl.text.isEmpty ? null : _doPreview,
           child: _busy
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Text('پیش‌نمایش فایل'),
@@ -156,19 +166,20 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
         ],
         if (_preview != null) ...[
           const SizedBox(height: 20),
-          Text('پیش‌نمایش (${_preview!.length} ردیف اول):', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text('پیش‌نمایش (نمونه از مجموع ${_totalCount ?? _preview!.length} ردیف):',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           ..._preview!.map((r) => Card(
                 child: ListTile(
                   title: Text(r['name'] as String),
-                  subtitle: Text('برند: ${r['brand'] ?? 'همه'} - مدل: ${r['model'] ?? 'همه'}'),
+                  subtitle: Text('برند: ${r['brand']}'),
                   trailing: Text('${r['price']}'),
                 ),
               )),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _busy || _selectedCategoryId == null ? null : _confirmImport,
-            child: const Text('تأیید و وارد کردن نهایی'),
+            child: Text('تأیید و وارد کردن نهایی (${_totalCount ?? _preview!.length} ردیف)'),
           ),
         ],
       ]),
