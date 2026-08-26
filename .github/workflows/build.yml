@@ -14,28 +14,17 @@ jobs:
           channel: stable
       - name: Create android scaffold
         run: flutter create --platforms=android --project-name receipt_app .
-      - name: Fix compileSdk version for app
-        run: |
-          FILE=$(find android/app -maxdepth 1 -name "build.gradle*" | head -n1)
-          sed -i -E 's/compileSdk = flutter\.compileSdkVersion/compileSdk = 36/' "$FILE"
-          sed -i -E 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 36/' "$FILE"
-          sed -i -E 's/compileSdk = [0-9]+/compileSdk = 36/' "$FILE"
-          sed -i -E 's/compileSdkVersion [0-9]+/compileSdkVersion 36/' "$FILE"
       - name: Get packages
         run: flutter pub get
-      - name: Patch all plugins compileSdk
+      - name: Show actual file_picker gradle file
         run: |
-          find ~/.pub-cache/hosted/pub.dev -maxdepth 1 -type d -name "*-*" | while read -r dir; do
-            for f in "$dir/android/build.gradle" "$dir/android/build.gradle.kts"; do
-              if [ -f "$f" ]; then
-                sed -i -E 's/compileSdkVersion [0-9]+/compileSdkVersion 36/' "$f"
-                sed -i -E 's/compileSdk = [0-9]+/compileSdk = 36/' "$f"
-                sed -i -E 's/compileSdk\.set\([0-9]+\)/compileSdk.set(36)/' "$f"
-                sed -i -E 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 36/' "$f"
-                sed -i -E 's/compileSdk = flutter\.compileSdkVersion/compileSdk = 36/' "$f"
-              fi
-            done
-          done
+          FP_DIR=$(find ~/.pub-cache/hosted/pub.dev -maxdepth 1 -type d -name "file_picker-*" | head -n1)
+          echo "=== FILE LIST ==="
+          find "$FP_DIR/android" -maxdepth 1 -type f
+          echo "=== build.gradle (groovy) if exists ==="
+          cat "$FP_DIR/android/build.gradle" 2>/dev/null || echo "(none)"
+          echo "=== build.gradle.kts if exists ==="
+          cat "$FP_DIR/android/build.gradle.kts" 2>/dev/null || echo "(none)"
       - name: Build APK
         run: flutter build apk --release
       - name: Upload APK
