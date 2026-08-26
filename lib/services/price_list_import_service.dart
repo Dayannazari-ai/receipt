@@ -32,7 +32,12 @@ class PriceListImportService {
       int? serviceColIndex;
       for (var i = 0; i < header.length; i++) {
         final text = _cellText(header[i]?.value);
-        if (text != null && (text.contains('خدمات') || text.contains('خدمت'))) {
+        if (text != null &&
+            (text.contains('خدمات') ||
+                text.contains('خدمت') ||
+                text.contains('تعمیرات') ||
+                text.contains('شرح') ||
+                text.contains('عنوان'))) {
           serviceColIndex = i;
           break;
         }
@@ -89,7 +94,7 @@ class PriceListImportService {
     final entries = _extractEntries(path);
     if (entries.isEmpty) {
       throw StateError(
-          'هیچ ردیف معتبری در فایل پیدا نشد. مطمئن شوید سرستون یکی از سلول‌های سطر اول شامل کلمه‌ی «خدمات» یا «خدمت» است.');
+          'هیچ ردیف معتبری در فایل پیدا نشد. مطمئن شوید سرستون یکی از سلول‌های سطر اول شامل کلمه‌ی «خدمات»، «خدمت»، «تعمیرات» یا «شرح» است.');
     }
 
     final existingBrands = await _vehicleRepo.getAllBrands();
