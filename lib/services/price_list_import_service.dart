@@ -8,44 +8,88 @@ class PriceListImportService {
   final _serviceRepo = ServiceRepository();
   final _vehicleRepo = VehicleReferenceRepository();
 
-  Future<List<Map<String, dynamic>>> previewFile(String path) async {
-    final rows = _readRows(path);
-    return rows.take(10).map((r) => {'name': r.$1, 'brand': r.$2, 'model': r.$3, 'price': r.$4}).toList();
-  }
-
   String? _cellText(CellValue? cv) {
     if (cv == null) return null;
     final s = cv.toString().trim();
     return s.isEmpty ? null : s;
   }
 
-  List<(String, String?, String?, double)> _readRows(String path) {
+  double? _cellNumber(CellValue? cv) {
+    final text = _cellText(cv);
+    if (text == null) return null;
+    return double.tryParse(text.replaceAll(',', ''));
+  }
+
+  List<(String, String?, double)> _extractEntries(String path) {
     final bytes = File(path).readAsBytesSync();
     final excel = Excel.decodeBytes(bytes);
-    final sheet = excel.tables[excel.tables.keys.first]!;
-    final result = <(String, String?, String?, double)>[];
-    for (var i = 1; i < sheet.maxRows; i++) {
-      final row = sheet.row(i);
-      if (row.isEmpty) continue;
-      final name = row.isNotEmpty ? _cellText(row[0]?.value) : null;
-      if (name == null || name.isEmpty) continue;
-      final brand = row.length > 1 ? _cellText(row[1]?.value) : null;
-      final model = row.length > 2 ? _cellText(row[2]?.value) : null;
-      final priceText = row.length > 3 ? _cellText(row[3]?.value) : null;
-      final price = priceText == null ? null : double.tryParse(priceText.replaceAll(',', ''));
-      if (price == null) continue;
-      result.add((name, brand, model, price));
+    final entries = <(String, String?, double)>[];
+
+    for (final sheet in excel.tables.values) {
+      if (sheet.maxRows == 0) continue;
+      final header = sheet.row(0);
+
+      int? serviceColIndex;
+      for (var i = 0; i < header.length; i++) {
+        final text = _cellText(header[i]?.value);
+        if (text != null && (text.contains('خدمات') || text.contains('خدمت'))) {
+          serviceColIndex = i;
+          break;
+        }
+      }
+      if (serviceColIndex == null) continue;
+
+      final brandCols = <int, String>{};
+      for (var i = 0; i < serviceColIndex; i++) {
+        final text = _cellText(header[i]?.value);
+        if (text != null) brandCols[i] = text;
+      }
+      final isFlat = brandCols.length <= 1;
+
+      for (var r = 1; r < sheet.maxRows; r++) {
+        final row = sheet.row(r);
+        if (row.length <= serviceColIndex) continue;
+        final name = _cellText(row[serviceColIndex]?.value);
+        if (name == null) continue;
+
+        if (isFlat) {
+          if (brandCols.isEmpty) continue;
+          final priceIdx = brandCols.keys.first;
+          if (row.length <= priceIdx) continue;
+          final price = _cellNumber(row[priceIdx]?.value);
+          if (price == null) continue;
+          entries.add((name, null, price));
+        } else {
+          for (final entry in brandCols.entries) {
+            if (row.length <= entry.key) continue;
+            final price = _cellNumber(row[entry.key]?.value);
+            if (price == null) continue;
+            entries.add((name, entry.value, price));
+          }
+        }
+      }
     }
-    return result;
+    return entries;
   }
+
+  Future<List<Map<String, dynamic>>> previewFile(String path) async {
+    final entries = _extractEntries(path);
+    return entries
+        .take(15)
+        .map((e) => {'name': e.$1, 'brand': e.$2 ?? 'همه برندها', 'price': e.$3})
+        .toList();
+  }
+
+  Future<int> countEntries(String path) async => _extractEntries(path).length;
 
   Future<({int services, int brands})> importFromFile({
     required String path,
     required int categoryId,
   }) async {
-    final rows = _readRows(path);
-    if (rows.isEmpty) {
-      throw StateError('هیچ ردیف معتبری در فایل پیدا نشد. فرمت فایل را بررسی کنید.');
+    final entries = _extractEntries(path);
+    if (entries.isEmpty) {
+      throw StateError(
+          'هیچ ردیف معتبری در فایل پیدا نشد. مطمئن شوید سرستون یکی از سلول‌های سطر اول شامل کلمه‌ی «خدمات» یا «خدمت» است.');
     }
 
     final existingBrands = await _vehicleRepo.getAllBrands();
@@ -56,8 +100,8 @@ class PriceListImportService {
     int counter = existingServices.length + 1;
     int servicesAdded = 0;
 
-    for (final row in rows) {
-      final (name, brandName, modelName, price) = row;
+    for (final entry in entries) {
+      final (name, brandName, price) = entry;
       int? brandId;
       if (brandName != null) {
         if (!brandIdByName.containsKey(brandName)) {
@@ -67,25 +111,15 @@ class PriceListImportService {
         }
         brandId = brandIdByName[brandName];
       }
-      int? modelId;
-      if (modelName != null && brandId != null) {
-        final models = await _vehicleRepo.getModelsByBrand(brandId);
-        final match = models.where((m) => m.name == modelName);
-        if (match.isNotEmpty) {
-          modelId = match.first.id;
-        } else {
-          modelId = await _vehicleRepo.insertModel(brandId, modelName);
-        }
-      }
 
-      final code = 'IMP-${counter.toString().padLeft(3, '0')}';
+      final code = 'IMP-${counter.toString().padLeft(4, '0')}';
       counter++;
       await _serviceRepo.insert(ServiceItem(
         name: name,
         code: code,
         categoryId: categoryId,
         brandId: brandId,
-        modelId: modelId,
+        modelId: null,
         price: price,
         notes: 'وارد‌شده از فایل نرخ‌نامه',
       ));
