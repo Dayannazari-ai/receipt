@@ -8,13 +8,15 @@ class InvoiceRepository {
   final _settingsRepo = SettingsRepository();
 
   /// شماره فاکتور با پیشوند انگلیسی نوع فاکتور، با ممیز جدا می‌شود.
-  /// S = خدمات (برق خودرو/مکانیک/جلوبندی), SL = فروش کالا, PR = خرید کالا
+  /// B = برق خودرو، M = مکانیک, J = جلوبندی، SL = فروش کالا, PR = خرید کالا
   String _prefixFor(InvoiceType type) {
     switch (type) {
       case InvoiceType.electrical:
+       return 'B';
       case InvoiceType.mechanic:
+       return 'M';
       case InvoiceType.suspension:
-        return 'S';
+        return 'J';
       case InvoiceType.productSale:
         return 'SL';
       case InvoiceType.productPurchase:
