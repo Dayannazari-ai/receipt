@@ -64,7 +64,12 @@ class PersianDateUtil {
       return isoDate;
     }
   }
-
+  static String formatFullWithIcon(DateTime dt) {
+    final j = _toJalali(dt);
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final min = dt.minute.toString().padLeft(2, '0');
+    return '${toPersianDigits('${j.day}/${_months[j.month - 1]}/${j.year} ، $hh:$min')} 🗓️';
+  }
   static DateTime startOfToday() {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
