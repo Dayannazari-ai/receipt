@@ -33,11 +33,11 @@ extension PaymentTypeX on PaymentType {
       case PaymentType.cash:
         return 'نقدی';
       case PaymentType.nonCash:
-        return 'غیر نقدی';
+        return 'چک';
       case PaymentType.cardToCard:
         return 'کارت به کارت';
       case PaymentType.onlinePayment:
-        return 'پرداخت آنلاین';
+        return `کارتخوان مغازه';
       case PaymentType.bankTransfer:
         return 'انتقال بانکی';
     }
