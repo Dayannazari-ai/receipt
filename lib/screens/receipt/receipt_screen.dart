@@ -48,6 +48,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   bool _issuing = false;
   bool _loadingInitial = true;
   String _nextInvoiceNumber = '';
+  DateTime _issueDateTime = DateTime.now();
 
   @override
   void initState() {
