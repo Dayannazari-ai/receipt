@@ -78,6 +78,25 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   double get _sideCostsTotal => _sideCosts.fold(0.0, (s, c) => s + c.amount);
   double get _finalAmount => _itemsTotal + _sideCostsTotal;
 
+  Future<void> _pickIssueDateTime() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _issueDateTime,
+      firstDate: DateTime(2015),
+      lastDate: DateTime(2100),
+    );
+    if (date == null) return;
+    if (!mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_issueDateTime),
+    );
+    if (time == null) return;
+    setState(() {
+      _issueDateTime = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    });
+  }
+
   void _showMsg(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
   Future<void> _pickCustomer() async {
