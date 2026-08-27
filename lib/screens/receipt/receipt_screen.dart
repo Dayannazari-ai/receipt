@@ -226,8 +226,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         paymentAccountInfo:
             _selectedAccount != null ? '${_selectedAccount!.title}: ${_selectedAccount!.number}' : null,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        issueDateTime: _issueDateTime,
       );
-
       if (mounted) {
         setState(() {
           _lines.clear();
