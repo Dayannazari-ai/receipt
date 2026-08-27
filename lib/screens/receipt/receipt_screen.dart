@@ -237,6 +237,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           _notesCtrl.clear();
           _selectedCustomerId = null;
         });
+        _issueDateTime = DateTime.now();
         await Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => InvoiceDetailScreen(invoiceId: invoiceId)));
         _init();
@@ -257,6 +258,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       _notesCtrl.clear();
       _selectedAccount = null;
       _selectedCustomerId = null;
+      _issueDateTime = DateTime.now();
       _paymentType = PaymentType.cash;
     });
   }
