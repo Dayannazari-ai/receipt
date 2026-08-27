@@ -292,7 +292,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             const Divider(height: 1),
             const SizedBox(height: 10),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Chip(label: Text(PersianDateUtil.formatDateNumeric(DateTime.now().toIso8601String()))),
+              GestureDetector(
+                onTap: _pickIssueDateTime,
+                child: Chip(
+                  avatar: const Icon(Icons.edit_calendar_outlined, size: 16),
+                  label: Text(PersianDateUtil.formatFullWithIcon(_issueDateTime)),
+                ),
+              ),
               Chip(label: Text('فاکتور ${PersianDateUtil.toPersianDigits(_nextInvoiceNumber)}')),
             ]),
           ]),
