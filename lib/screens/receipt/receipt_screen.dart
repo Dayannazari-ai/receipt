@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:persian_datetime_picker/persian_datetime_picker.dart';
+import 'package:shamsi_date/shamsi_date.dart';
 import '../../models/invoice.dart';
 import '../../models/customer.dart';
 import '../../models/product.dart';
@@ -80,21 +82,22 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   double get _finalAmount => _itemsTotal + _sideCostsTotal;
 
   Future<void> _pickIssueDateTime() async {
-    final date = await showDatePicker(
+    final jalali = await showPersianDatePicker(
       context: context,
-      initialDate: _issueDateTime,
-      firstDate: DateTime(2015),
-      lastDate: DateTime(2100),
+      initialDate: Jalali.fromDateTime(_issueDateTime),
+      firstDate: Jalali(1394, 1, 1),
+      lastDate: Jalali(1450, 12, 29),
     );
-    if (date == null) return;
+    if (jalali == null) return;
     if (!mounted) return;
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(_issueDateTime),
     );
     if (time == null) return;
+    final g = jalali.toDateTime();
     setState(() {
-      _issueDateTime = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _issueDateTime = DateTime(g.year, g.month, g.day, time.hour, time.minute);
     });
   }
 
@@ -182,8 +185,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               final amount = double.tryParse(amountCtrl.text.replaceAll(',', '')) ?? 0;
               if (titleCtrl.text.trim().isEmpty || amount <= 0) return;
               Navigator.pop(ctx, SideCostLine(title: titleCtrl.text.trim(), amount: amount));
-            },
-            child: const Text('افزودن'),
+            },            child: const Text('افزودن'),
           ),
         ]),
       ),
@@ -311,7 +313,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               Chip(label: Text('فاکتور ${PersianDateUtil.toPersianDigits(_nextInvoiceNumber)}')),
             ]),
           ]),
-        ),const SizedBox(height: 16),
+        ),
+        const SizedBox(height: 16),
         DropdownButtonFormField<InvoiceType>(
           value: _type,
           decoration: const InputDecoration(labelText: 'نوع فاکتور'),
@@ -360,8 +363,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               onPressed: () => _showMsg('اسکن کالا به‌زودی اضافه می‌شود'),
             ),
           ]),
-        ]),
-        TextButton.icon(icon: const Icon(Icons.add), label: const Text('افزودن'), onPressed: _addItemManually),
+        ]),        TextButton.icon(icon: const Icon(Icons.add), label: const Text('افزودن'), onPressed: _addItemManually),
         const SizedBox(height: 8),
         if (_lines.isEmpty)
           Container(
@@ -453,13 +455,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           const SizedBox(height: 10),
           InkWell(
             onTap: () async {
-              final date = await showDatePicker(
+              final jalali = await showPersianDatePicker(
                 context: context,
-                initialDate: _checkDueDate ?? DateTime.now(),
-                firstDate: DateTime(2015),
-                lastDate: DateTime(2100),
+                initialDate: Jalali.fromDateTime(_checkDueDate ?? DateTime.now()),
+                firstDate: Jalali(1394, 1, 1),
+                lastDate: Jalali(1450, 12, 29),
               );
-              if (date != null) setState(() => _checkDueDate = date);
+              if (jalali != null) setState(() => _checkDueDate = jalali.toDateTime());
             },
             child: InputDecorator(
               decoration: const InputDecoration(labelText: 'تاریخ سررسید چک'),
@@ -484,6 +486,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     );
   }
 }
+
 // ---------------- Customer picker ----------------
 
 class _CustomerPickerSheet extends StatefulWidget {
@@ -544,10 +547,7 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet> {
         ]),
       ),
     );
-  }
-}
-
-// ---------------- Service picker with separate brand/model filters ----------------
+  }// ---------------- Service picker with separate brand/model filters ----------------
 
 class _ServicePickerSheet extends StatefulWidget {
   final InvoiceType invoiceType;
@@ -740,7 +740,7 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
                             unitPrice: price));
                   },
                   child: const Text('افزودن به فاکتور'),
-                ),
+}                ),
               ]),
       ),
     );
@@ -778,6 +778,7 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
       _priceCtrl.text = p.sellPrice.toStringAsFixed(0);
     });
   }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
