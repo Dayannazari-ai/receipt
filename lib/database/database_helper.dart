@@ -140,6 +140,7 @@ class DatabaseHelper {
         final_amount REAL NOT NULL DEFAULT 0,
         payment_type TEXT NOT NULL,
         payment_account_info TEXT,
+        check_due_date TEXT,
         notes TEXT,
         is_deleted INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
