@@ -41,6 +41,7 @@ class InvoiceService {
     String? paymentAccountInfo,
     String? notes,
     DateTime? issueDateTime,
+    String? checkDueDate,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -60,6 +61,7 @@ class InvoiceService {
       finalAmount: finalAmount,
       paymentType: paymentType,
       paymentAccountInfo: paymentAccountInfo,
+      checkDueDate: checkDueDate,
       notes: notes,
     );
 
