@@ -14,6 +14,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
   final _searchCtrl = TextEditingController();
   List<Customer> _customers = [];
   bool _loading = true;
+  bool _debtorsOnly = false;
 
   @override
   void initState() {
@@ -23,8 +24,16 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final list =
-        _searchCtrl.text.trim().isEmpty ? await _repo.getAll() : await _repo.search(_searchCtrl.text.trim());
+    List<Customer> list;
+    if (_debtorsOnly) {
+      list = await _repo.getDebtors();
+      if (_searchCtrl.text.trim().isNotEmpty) {
+        final q = _searchCtrl.text.trim();
+        list = list.where((c) => c.name.contains(q) || c.mobile.contains(q)).toList();
+      }
+    } else {
+      list = _searchCtrl.text.trim().isEmpty ? await _repo.getAll() : await _repo.search(_searchCtrl.text.trim());
+    }
     if (!mounted) return;
     setState(() {
       _customers = list;
@@ -99,19 +108,39 @@ class _CustomersScreenState extends State<CustomersScreen> {
             onChanged: (_) => _load(),
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: FilterChip(
+              label: const Text('مشتریان بدهکار'),
+              avatar: const Icon(Icons.warning_amber, size: 18, color: Colors.red),
+              selected: _debtorsOnly,
+              onSelected: (v) {
+                setState(() => _debtorsOnly = v);
+                _load();
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
         Expanded(
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _customers.isEmpty
-                  ? const Center(child: Text('مشتری ثبت نشده است'))
+                  ? Center(child: Text(_debtorsOnly ? 'مشتری بدهکاری ثبت نشده است' : 'مشتری ثبت نشده است'))
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       itemCount: _customers.length,
                       itemBuilder: (context, i) {
                         final c = _customers[i];
                         return Card(
+                          color: _debtorsOnly ? Colors.red.shade50 : null,
                           child: ListTile(
-                            leading: const CircleAvatar(child: Icon(Icons.person)),
+                            leading: CircleAvatar(
+                              backgroundColor: _debtorsOnly ? Colors.red.shade100 : null,
+                              child: Icon(_debtorsOnly ? Icons.warning_amber : Icons.person),
+                            ),
                             title: Text(c.name),
                             subtitle: Text(PersianDateUtil.toPersianDigits(c.mobile)),
                             onTap: () => _addOrEdit(customer: c),
