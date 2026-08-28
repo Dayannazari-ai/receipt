@@ -47,4 +47,16 @@ class CustomerRepository {
     final r = await db.rawQuery('SELECT COUNT(*) c FROM customers WHERE is_deleted = 0');
     return Sqflite.firstIntValue(r) ?? 0;
   }
+
+  /// مشتریانی که حداقل یک فاکتور با نوع پرداخت «چک» دارند (بدهکار).
+  Future<List<Customer>> getDebtors() async {
+    final db = await _db.database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT c.* FROM customers c
+      JOIN invoices i ON i.customer_id = c.id
+      WHERE c.is_deleted = 0 AND i.is_deleted = 0 AND i.payment_type = 'nonCash'
+      ORDER BY c.name
+    ''');
+    return rows.map((r) => Customer.fromMap(r)).toList();
+  }
 }
