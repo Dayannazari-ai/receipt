@@ -185,7 +185,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               final amount = double.tryParse(amountCtrl.text.replaceAll(',', '')) ?? 0;
               if (titleCtrl.text.trim().isEmpty || amount <= 0) return;
               Navigator.pop(ctx, SideCostLine(title: titleCtrl.text.trim(), amount: amount));
-            },            child: const Text('افزودن'),
+            },
+            child: const Text('افزودن'),
           ),
         ]),
       ),
@@ -363,7 +364,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               onPressed: () => _showMsg('اسکن کالا به‌زودی اضافه می‌شود'),
             ),
           ]),
-        ]),        TextButton.icon(icon: const Icon(Icons.add), label: const Text('افزودن'), onPressed: _addItemManually),
+        ]),
+        TextButton.icon(icon: const Icon(Icons.add), label: const Text('افزودن'), onPressed: _addItemManually),
         const SizedBox(height: 8),
         if (_lines.isEmpty)
           Container(
@@ -547,7 +549,10 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet> {
         ]),
       ),
     );
-  }// ---------------- Service picker with separate brand/model filters ----------------
+  }
+}
+
+// ---------------- Service picker with separate brand/model filters ----------------
 
 class _ServicePickerSheet extends StatefulWidget {
   final InvoiceType invoiceType;
@@ -740,7 +745,7 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
                             unitPrice: price));
                   },
                   child: const Text('افزودن به فاکتور'),
-}                ),
+                ),
               ]),
       ),
     );
