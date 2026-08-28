@@ -37,7 +37,7 @@ extension PaymentTypeX on PaymentType {
       case PaymentType.cardToCard:
         return 'کارت به کارت';
       case PaymentType.onlinePayment:
-        return `کارتخوان مغازه';
+        return 'کارت‌خوان مغازه';
       case PaymentType.bankTransfer:
         return 'انتقال بانکی';
     }
@@ -66,6 +66,7 @@ class Invoice {
   final double finalAmount;
   final PaymentType paymentType;
   final String? paymentAccountInfo; // شماره کارت/شبا انتخاب‌شده
+  final String? checkDueDate; // تاریخ سررسید چک (فقط وقتی نوع پرداخت چک است)
   final String? notes;
   final int isDeleted;
   final String createdAt;
@@ -81,10 +82,14 @@ class Invoice {
     required this.finalAmount,
     required this.paymentType,
     this.paymentAccountInfo,
+    this.checkDueDate,
     this.notes,
     this.isDeleted = 0,
     String? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
+
+  /// مشتری در صورتی «بدهکار» محسوب می‌شود که نوع پرداخت این فاکتور چک باشد.
+  bool get isDebt => paymentType == PaymentType.nonCash;
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -97,6 +102,7 @@ class Invoice {
         'final_amount': finalAmount,
         'payment_type': paymentType.dbValue,
         'payment_account_info': paymentAccountInfo,
+        'check_due_date': checkDueDate,
         'notes': notes,
         'is_deleted': isDeleted,
         'created_at': createdAt,
@@ -113,6 +119,7 @@ class Invoice {
         finalAmount: (map['final_amount'] as num).toDouble(),
         paymentType: PaymentTypeX.fromDb(map['payment_type'] as String),
         paymentAccountInfo: map['payment_account_info'] as String?,
+        checkDueDate: map['check_due_date'] as String?,
         notes: map['notes'] as String?,
         isDeleted: map['is_deleted'] as int? ?? 0,
         createdAt: map['created_at'] as String?,
