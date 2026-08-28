@@ -39,6 +39,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   InvoiceType _type = InvoiceType.electrical;
   PaymentType _paymentType = PaymentType.cash;
   PaymentAccount? _selectedAccount;
+  DateTime? _checkDueDate;
   List<PaymentAccount> _accounts = [];
   AppSettings _settings = AppSettings();
   int? _selectedCustomerId;
@@ -201,6 +202,10 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       _showMsg('لطفاً حساب مقصد را انتخاب کنید');
       return;
     }
+    if (_paymentType == PaymentType.nonCash && _checkDueDate == null) {
+      _showMsg('لطفاً تاریخ سررسید چک را مشخص کنید');
+      return;
+    }
 
     setState(() => _issuing = true);
     try {
@@ -227,7 +232,9 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             _selectedAccount != null ? '${_selectedAccount!.title}: ${_selectedAccount!.number}' : null,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         issueDateTime: _issueDateTime,
+        checkDueDate: _checkDueDate?.toIso8601String(),
       );
+
       if (mounted) {
         setState(() {
           _lines.clear();
@@ -236,8 +243,9 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           _mobileCtrl.clear();
           _notesCtrl.clear();
           _selectedCustomerId = null;
+          _issueDateTime = DateTime.now();
+          _checkDueDate = null;
         });
-        _issueDateTime = DateTime.now();
         await Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => InvoiceDetailScreen(invoiceId: invoiceId)));
         _init();
@@ -258,8 +266,9 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       _notesCtrl.clear();
       _selectedAccount = null;
       _selectedCustomerId = null;
-      _issueDateTime = DateTime.now();
       _paymentType = PaymentType.cash;
+      _issueDateTime = DateTime.now();
+      _checkDueDate = null;
     });
   }
 
@@ -302,8 +311,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               Chip(label: Text('فاکتور ${PersianDateUtil.toPersianDigits(_nextInvoiceNumber)}')),
             ]),
           ]),
-        ),
-        const SizedBox(height: 16),
+        ),const SizedBox(height: 16),
         DropdownButtonFormField<InvoiceType>(
           value: _type,
           decoration: const InputDecoration(labelText: 'نوع فاکتور'),
@@ -432,6 +440,35 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             items: _accounts.map((a) => DropdownMenuItem(value: a, child: Text('${a.title} - ${a.number}'))).toList(),
             onChanged: (a) => setState(() => _selectedAccount = a),
           ),
+        if (_paymentType == PaymentType.nonCash) ...[
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)),
+            child: const Row(children: [
+              Icon(Icons.warning_amber, color: Colors.red, size: 18),
+              SizedBox(width: 6),
+              Expanded(child: Text('با انتخاب چک، این فاکتور در فهرست «مشتریان بدهکار» ثبت می‌شود.', style: TextStyle(fontSize: 12))),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          InkWell(
+            onTap: () async {
+              final date = await showDatePicker(
+                context: context,
+                initialDate: _checkDueDate ?? DateTime.now(),
+                firstDate: DateTime(2015),
+                lastDate: DateTime(2100),
+              );
+              if (date != null) setState(() => _checkDueDate = date);
+            },
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: 'تاریخ سررسید چک'),
+              child: Text(_checkDueDate == null
+                  ? 'انتخاب تاریخ'
+                  : PersianDateUtil.formatDateNumeric(_checkDueDate!.toIso8601String())),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         TextField(controller: _notesCtrl, decoration: const InputDecoration(labelText: 'توضیحات'), maxLines: 2),
         const SizedBox(height: 24),
@@ -447,7 +484,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     );
   }
 }
-
 // ---------------- Customer picker ----------------
 
 class _CustomerPickerSheet extends StatefulWidget {
@@ -742,7 +778,6 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
       _priceCtrl.text = p.sellPrice.toStringAsFixed(0);
     });
   }
-
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
