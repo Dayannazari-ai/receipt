@@ -7,6 +7,7 @@ import '../../repositories/settings_repository.dart';
 import '../../repositories/payment_account_repository.dart';
 import '../../services/backup_service.dart';
 import '../../services/seed_service.dart';
+import '../../services/auth_service.dart';
 import '../../main.dart';
 import 'price_list_import_screen.dart';
 
@@ -18,6 +19,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _repo = SettingsRepository();
+  final _authService = AuthService();
   final _paymentRepo = PaymentAccountRepository();
   final _backupService = BackupService();
   final _seedService = SeedService();
@@ -35,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<PaymentAccount> _accounts = [];
   bool _loading = true;
   bool _busy = false;
+  bool _hasPassword = false;
 
   final _colorOptions = ['#FF7A1A', '#1E5F74', '#2E8B57', '#D64545', '#6B4EFF', '#00838F'];
 
@@ -47,6 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final settings = await _repo.getSettings();
     final accounts = await _paymentRepo.getAll();
+    final hasPassword = await _authService.hasPassword();
     _shopName = TextEditingController(text: settings.shopName);
     _contactNumber = TextEditingController(text: settings.contactNumber);
     _address = TextEditingController(text: settings.address);
@@ -60,6 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _colorHex = settings.primaryColorHex;
       _stampImagePath = settings.stampImagePath;
       _accounts = accounts;
+      _hasPassword = hasPassword;
       _loading = false;
     });
   }
@@ -121,6 +126,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (saved == true) _load();
+  }
+
+  Future<void> _setOrChangePassword() async {
+    final oldCtrl = TextEditingController();
+    final newCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    String? errorText;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) {
+        return AlertDialog(
+          title: Text(_hasPassword ? 'تغییر رمز عبور' : 'تعیین رمز عبور'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (_hasPassword)
+              TextField(
+                  controller: oldCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'رمز فعلی')),
+            if (_hasPassword) const SizedBox(height: 10),
+            TextField(
+                controller: newCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'رمز جدید')),
+            const SizedBox(height: 10),
+            TextField(
+                controller: confirmCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'تکرار رمز جدید')),
+            if (errorText != null) ...[
+              const SizedBox(height: 10),
+              Text(errorText!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+            TextButton(
+              onPressed: () async {
+                if (_hasPassword) {
+                  final ok = await _authService.verify(oldCtrl.text);
+                  if (!ok) {
+                    setDialogState(() => errorText = 'رمز فعلی اشتباه است');
+                    return;
+                  }
+                }
+                if (newCtrl.text.trim().isEmpty) {
+                  setDialogState(() => errorText = 'رمز جدید نباید خالی باشد');
+                  return;
+                }
+                if (newCtrl.text != confirmCtrl.text) {
+                  setDialogState(() => errorText = 'رمز جدید و تکرار آن یکسان نیستند');
+                  return;
+                }
+                await _authService.setPassword(newCtrl.text);
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: const Text('ذخیره'),
+            ),
+          ],
+        );
+      }),
+    );
+    if (saved == true) _load();
+  }
+
+  Future<void> _removePassword() async {
+    final ctrl = TextEditingController();
+    String? errorText;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) {
+        return AlertDialog(
+          title: const Text('حذف رمز عبور'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('برای حذف رمز، رمز فعلی را وارد کنید:'),
+            const SizedBox(height: 10),
+            TextField(controller: ctrl, obscureText: true, decoration: const InputDecoration(labelText: 'رمز فعلی')),
+            if (errorText != null) ...[
+              const SizedBox(height: 10),
+              Text(errorText!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+            TextButton(
+              onPressed: () async {
+                final ok = await _authService.verify(ctrl.text);
+                if (!ok) {
+                  setDialogState(() => errorText = 'رمز فعلی اشتباه است');
+                  return;
+                }
+                await _authService.removePassword();
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: const Text('حذف رمز', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      }),
+    );
+    if (confirmed == true) _load();
   }
 
   Future<void> _doBackup() async {
@@ -244,6 +349,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 20),
 
           ElevatedButton(onPressed: _save, child: const Text('ذخیره تنظیمات')),
+
+          const SizedBox(height: 28),
+          const Divider(),
+          const SizedBox(height: 12),
+          const Text('رمز عبور برنامه', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const SizedBox(height: 6),
+          Text(
+            _hasPassword
+                ? 'رمز عبور فعال است. برای باز کردن برنامه باید رمز وارد شود.'
+                : 'رمز عبور تنظیم نشده — برنامه بدون رمز باز می‌شود.',
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.lock_outline),
+            label: Text(_hasPassword ? 'تغییر رمز عبور' : 'تعیین رمز عبور'),
+            onPressed: _setOrChangePassword,
+          ),
+          if (_hasPassword) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.lock_open_outlined),
+              label: const Text('حذف رمز عبور'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: _removePassword,
+            ),
+          ],
 
           const SizedBox(height: 28),
           const Divider(),
