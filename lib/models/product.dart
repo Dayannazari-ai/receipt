@@ -2,6 +2,7 @@ class Product {
   final int? id;
   final String name;
   final String code;
+  final String? barcode;
   final double purchasePrice;
   final double sellPrice;
   final int stock;
@@ -14,6 +15,7 @@ class Product {
     this.id,
     required this.name,
     required this.code,
+    this.barcode,
     required this.purchasePrice,
     required this.sellPrice,
     this.stock = 0,
@@ -29,6 +31,7 @@ class Product {
         'id': id,
         'name': name,
         'code': code,
+        'barcode': barcode,
         'purchase_price': purchasePrice,
         'sell_price': sellPrice,
         'stock': stock,
@@ -42,6 +45,7 @@ class Product {
         id: map['id'] as int?,
         name: map['name'] as String,
         code: map['code'] as String,
+        barcode: map['barcode'] as String?,
         purchasePrice: (map['purchase_price'] as num).toDouble(),
         sellPrice: (map['sell_price'] as num).toDouble(),
         stock: map['stock'] as int? ?? 0,
@@ -54,6 +58,7 @@ class Product {
   Product copyWith({
     String? name,
     String? code,
+    String? barcode,
     double? purchasePrice,
     double? sellPrice,
     int? stock,
@@ -64,6 +69,7 @@ class Product {
         id: id,
         name: name ?? this.name,
         code: code ?? this.code,
+        barcode: barcode ?? this.barcode,
         purchasePrice: purchasePrice ?? this.purchasePrice,
         sellPrice: sellPrice ?? this.sellPrice,
         stock: stock ?? this.stock,
