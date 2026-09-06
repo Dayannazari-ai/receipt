@@ -55,6 +55,22 @@ class ProductRepository {
     return rows.isNotEmpty;
   }
 
+  /// جستجوی کالا بر اساس بارکد اسکن‌شده. برای اسکن هنگام صدور فاکتور استفاده می‌شود.
+  Future<Product?> getByBarcode(String barcode) async {
+    final db = await _db.database;
+    final rows = await db.query('products',
+        where: 'is_deleted = 0 AND barcode = ?', whereArgs: [barcode]);
+    return rows.isEmpty ? null : Product.fromMap(rows.first);
+  }
+
+  Future<bool> barcodeExists(String barcode, {int? excludeId}) async {
+    final db = await _db.database;
+    final rows = await db.query('products',
+        where: excludeId == null ? 'barcode = ?' : 'barcode = ? AND id != ?',
+        whereArgs: excludeId == null ? [barcode] : [barcode, excludeId]);
+    return rows.isNotEmpty;
+  }
+
   Future<int> count() async {
     final db = await _db.database;
     final r = await db.rawQuery('SELECT COUNT(*) c FROM products WHERE is_deleted = 0');
