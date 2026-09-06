@@ -107,6 +107,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         code TEXT NOT NULL,
+        barcode TEXT,
         purchase_price REAL NOT NULL,
         sell_price REAL NOT NULL,
         stock INTEGER NOT NULL DEFAULT 0,
