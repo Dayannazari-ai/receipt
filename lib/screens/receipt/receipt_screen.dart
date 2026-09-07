@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/product.dart';
 import '../../repositories/product_repository.dart';
 import '../../utils/validators.dart';
-import 'barcode_scanner_screen.dart';
+import '../products/barcode_scanner_screen.dart';
 
 /// فرم افزودن/ویرایش کالا، به‌صورت صفحه‌ی مستقل تا هم از «انبار کالا» و هم
 /// از «صدور فاکتور» (هنگام برخورد با بارکد ناشناخته) قابل استفاده باشد.
