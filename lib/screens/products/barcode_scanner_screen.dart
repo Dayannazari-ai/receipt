@@ -1,116 +1,68 @@
 import 'package:flutter/material.dart';
-import '../../models/product.dart';
-import '../../models/app_settings.dart';
-import '../../repositories/product_repository.dart';
-import '../../repositories/settings_repository.dart';
-import '../../utils/currency_formatter.dart';
-import '../../utils/persian_date.dart';
-import 'product_form_screen.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
-class ProductsScreen extends StatefulWidget {
-  const ProductsScreen({super.key});
+class BarcodeScannerScreen extends StatefulWidget {
+  const BarcodeScannerScreen({super.key});
+
   @override
-  State<ProductsScreen> createState() => _ProductsScreenState();
+  State<BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
 }
 
-class _ProductsScreenState extends State<ProductsScreen> {
-  final _repo = ProductRepository();
-  final _settingsRepo = SettingsRepository();
-  final _searchCtrl = TextEditingController();
-  List<Product> _products = [];
-  Currency _currency = Currency.toman;
-  bool _lowStockOnly = false;
-  bool _loading = true;
+class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
+  final MobileScannerController _controller = MobileScannerController();
+  bool _handled = false;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    var list = _searchCtrl.text.trim().isEmpty
-        ? await _repo.getAll()
-        : await _repo.search(_searchCtrl.text.trim());
-    if (_lowStockOnly) list = list.where((p) => p.isLowStock).toList();
-    final settings = await _settingsRepo.getSettings();
-    if (!mounted) return;
-    setState(() {
-      _products = list;
-      _currency = settings.currency;
-      _loading = false;
-    });
-  }
-
-  Future<void> _openForm({Product? product}) async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => ProductFormScreen(product: product)));
-    _load();
+  void _onDetect(BarcodeCapture capture) {
+    if (_handled) return;
+    final barcodes = capture.barcodes;
+    if (barcodes.isEmpty) return;
+    final value = barcodes.first.rawValue;
+    if (value == null || value.isEmpty) return;
+    _handled = true;
+    Navigator.of(context).pop(value);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('انبار کالا'), actions: [
-        IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-      ]),
-      body: Column(children: [
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: TextField(
-            controller: _searchCtrl,
-            decoration: const InputDecoration(hintText: 'جستجوی کالا', prefixIcon: Icon(Icons.search)),
-            onChanged: (_) => _load(),
+      appBar: AppBar(
+        title: const Text('اسکن بارکد'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on),
+            onPressed: () => _controller.toggleTorch(),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: FilterChip(
-              label: const Text('کمبود موجودی'),
-              selected: _lowStockOnly,
-              onSelected: (v) {
-                setState(() => _lowStockOnly = v);
-                _load();
-              },
+        ],
+      ),
+      body: Stack(children: [
+        MobileScanner(controller: _controller, onDetect: _onDetect),
+        Center(
+          child: Container(
+            width: 260,
+            height: 160,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white, width: 2),
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
         ),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _products.isEmpty
-                  ? const Center(child: Text('کالایی یافت نشد'))
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(12),
-                      itemCount: _products.length,
-                      itemBuilder: (context, i) {
-                        final p = _products[i];
-                        return Card(
-                          color: p.isLowStock ? Colors.red.shade50 : null,
-                          child: ListTile(
-                            leading: CircleAvatar(
-                                backgroundColor: p.isLowStock ? Colors.red.shade100 : null,
-                                child: Icon(p.isLowStock ? Icons.warning_amber : Icons.inventory_2_outlined)),
-                            title: Text(p.name),
-                            subtitle: Text(
-                                'موجودی: ${PersianDateUtil.toPersianDigits('${p.stock}')}'
-                                '${p.barcode != null ? ' - بارکد: ${p.barcode}' : ''}'),
-                            trailing: Text(CurrencyFormatter.format(p.sellPrice, _currency)),
-                            onTap: () => _openForm(product: p),
-                          ),
-                        );
-                      },
-                    ),
+        const Positioned(
+          bottom: 32,
+          left: 0,
+          right: 0,
+          child: Text(
+            'بارکد را داخل کادر قرار دهید',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white, fontSize: 14, shadows: [Shadow(blurRadius: 4)]),
+          ),
         ),
       ]),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.add),
-        label: const Text('افزودن کالا'),
-        onPressed: () => _openForm(),
-      ),
     );
   }
 }
