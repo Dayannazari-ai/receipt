@@ -40,6 +40,7 @@ class Product {
         'is_deleted': isDeleted,
         'created_at': createdAt,
       };
+  
 
   factory Product.fromMap(Map<String, dynamic> map) => Product(
         id: map['id'] as int?,
