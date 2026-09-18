@@ -11,6 +11,11 @@ class BarcodeScannerScreen extends StatefulWidget {
 class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   final MobileScannerController _controller = MobileScannerController();
   bool _handled = false;
+  @override
+  void initState() {
+    super.initState();
+    _controller.start();
+  }
 
   @override
   void dispose() {
