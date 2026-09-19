@@ -41,7 +41,20 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         ],
       ),
       body: Stack(children: [
-        MobileScanner(controller: _controller, onDetect: _onDetect),
+        MobileScanner(
+          controller: _controller,
+          onDetect: _onDetect,
+          errorBuilder: (context, error) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'خطای دوربین: ${error.errorCode}\n${error.errorDetails?.message ?? ""}',
+                style: const TextStyle(color: Colors.white),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ),
         Center(
           child: Container(
             width: 260,
