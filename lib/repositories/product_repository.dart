@@ -39,6 +39,24 @@ class ProductRepository {
         where: 'is_deleted = 0 AND (name LIKE ? OR code LIKE ?)', whereArgs: [like, like], orderBy: 'name');
     return rows.map((r) => Product.fromMap(r)).toList();
   }
+  /// جستجوی فازی/نزدیک بر اساس نام یا برچسب جستجوی صوتی. برای جستجوی صوتی
+  /// استفاده می‌شود: همه‌ی کلمات پرسش باید جایی در نام یا برچسب پیدا شوند
+  /// (نه لزوماً تطابق دقیق و پشت‌سرهم).
+  Future<List<Product>> searchFuzzy(String query) async {
+    final db = await _db.database;
+    final tokens = query.trim().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    if (tokens.isEmpty) return [];
+    final whereParts = <String>[];
+    final args = <String>[];
+    for (final t in tokens) {
+      whereParts.add('(name LIKE ? OR voice_search_label LIKE ?)');
+      args.add('%$t%');
+      args.add('%$t%');
+    }
+    final rows = await db.query('products',
+        where: 'is_deleted = 0 AND (${whereParts.join(' AND ')})', whereArgs: args, orderBy: 'name');
+    return rows.map((r) => Product.fromMap(r)).toList();
+  }
 
   Future<List<Product>> getLowStock() async {
     final db = await _db.database;
