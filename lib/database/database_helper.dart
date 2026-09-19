@@ -8,7 +8,10 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static const String dbName = 'receipt_app.db';
-  static const int dbVersion = 1;
+  // نسخه ۲: افزودن ستون voice_search_label به products و services برای
+  // قابلیت جستجوی صوتی. این تغییر با Migration امن (ALTER TABLE) انجام
+  // می‌شود و هیچ داده‌ی قبلی کاربران حذف یا بازنویسی نمی‌شود.
+  static const int dbVersion = 2;
 
   Database? _db;
 
@@ -25,10 +28,12 @@ class DatabaseHelper {
       dpath,
       version: dbVersion,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
       onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
     );
   }
 
+  /// نصب تازه (کاربر جدید): جداول از همان ابتدا شامل voice_search_label هستند.
   Future<void> _onCreate(Database db, int version) async {
     final batch = db.batch();
 
@@ -79,6 +84,7 @@ class DatabaseHelper {
         model_id INTEGER,
         price REAL NOT NULL,
         notes TEXT,
+        voice_search_label TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
         is_deleted INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (category_id) REFERENCES service_categories(id),
@@ -113,6 +119,7 @@ class DatabaseHelper {
         stock INTEGER NOT NULL DEFAULT 0,
         min_stock INTEGER NOT NULL DEFAULT 0,
         notes TEXT,
+        voice_search_label TEXT,
         is_deleted INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
       )
@@ -202,6 +209,22 @@ class DatabaseHelper {
     ''');
 
     await batch.commit(noResult: true);
+  }
+
+  /// نصب موجود (کاربر قبلی): فقط ستون‌های جدید با ALTER TABLE اضافه می‌شوند.
+  /// هیچ جدولی حذف یا بازسازی نمی‌شود و هیچ داده‌ای از بین نمی‌رود.
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // ستون ممکن است در نصب‌های خیلی جدید از قبل وجود داشته باشد؛
+      // برای اطمینان، خطای "duplicate column" را نادیده می‌گیریم تا
+      // ارتقا هرگز باعث Crash نشود.
+      try {
+        await db.execute('ALTER TABLE products ADD COLUMN voice_search_label TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE services ADD COLUMN voice_search_label TEXT');
+      } catch (_) {}
+    }
   }
 
   Future<void> close() async {
