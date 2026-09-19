@@ -3,6 +3,7 @@ class Product {
   final String name;
   final String code;
   final String? barcode;
+  final String? voiceSearchLabel;
   final double purchasePrice;
   final double sellPrice;
   final int stock;
@@ -16,6 +17,7 @@ class Product {
     required this.name,
     required this.code,
     this.barcode,
+    this.voiceSearchLabel,
     required this.purchasePrice,
     required this.sellPrice,
     this.stock = 0,
@@ -32,6 +34,7 @@ class Product {
         'name': name,
         'code': code,
         'barcode': barcode,
+        'voice_search_label': voiceSearchLabel,
         'purchase_price': purchasePrice,
         'sell_price': sellPrice,
         'stock': stock,
@@ -47,6 +50,7 @@ class Product {
         name: map['name'] as String,
         code: map['code'] as String,
         barcode: map['barcode'] as String?,
+        voiceSearchLabel: map['voice_search_label'] as String?,
         purchasePrice: (map['purchase_price'] as num).toDouble(),
         sellPrice: (map['sell_price'] as num).toDouble(),
         stock: map['stock'] as int? ?? 0,
@@ -60,6 +64,7 @@ class Product {
     String? name,
     String? code,
     String? barcode,
+    String? voiceSearchLabel,
     double? purchasePrice,
     double? sellPrice,
     int? stock,
@@ -71,6 +76,7 @@ class Product {
         name: name ?? this.name,
         code: code ?? this.code,
         barcode: barcode ?? this.barcode,
+        voiceSearchLabel: voiceSearchLabel ?? this.voiceSearchLabel,
         purchasePrice: purchasePrice ?? this.purchasePrice,
         sellPrice: sellPrice ?? this.sellPrice,
         stock: stock ?? this.stock,
