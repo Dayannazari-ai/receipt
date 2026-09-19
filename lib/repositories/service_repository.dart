@@ -84,6 +84,22 @@ class ServiceRepository {
         where: 'is_deleted = 0 AND (name LIKE ? OR code LIKE ?)', whereArgs: [like, like], orderBy: 'name');
     return rows.map((r) => ServiceItem.fromMap(r)).toList();
   }
+  /// جستجوی فازی/نزدیک برای جستجوی صوتی خدمات.
+  Future<List<ServiceItem>> searchFuzzy(String query) async {
+    final db = await _db.database;
+    final tokens = query.trim().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    if (tokens.isEmpty) return [];
+    final whereParts = <String>[];
+    final args = <String>[];
+    for (final t in tokens) {
+      whereParts.add('(name LIKE ? OR voice_search_label LIKE ?)');
+      args.add('%$t%');
+      args.add('%$t%');
+    }
+    final rows = await db.query('services',
+        where: 'is_deleted = 0 AND (${whereParts.join(' AND ')})', whereArgs: args, orderBy: 'name');
+    return rows.map((r) => ServiceItem.fromMap(r)).toList();
+  }
 
   Future<bool> codeExists(String code, {int? excludeId}) async {
     final db = await _db.database;
