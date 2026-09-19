@@ -14,7 +14,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   @override
   void initState() {
     super.initState();
-    _controller.start();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _controller.start();
+    });
   }
 
   @override
