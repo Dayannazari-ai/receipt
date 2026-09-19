@@ -27,6 +27,7 @@ class ServiceItem {
   final int? modelId;
   final double price;
   final String? notes;
+  final String? voiceSearchLabel;
   final int isActive;
   final int isDeleted;
 
@@ -39,6 +40,7 @@ class ServiceItem {
     this.modelId,
     required this.price,
     this.notes,
+    this.voiceSearchLabel,
     this.isActive = 1,
     this.isDeleted = 0,
   });
@@ -52,6 +54,7 @@ class ServiceItem {
         'model_id': modelId,
         'price': price,
         'notes': notes,
+        'voice_search_label': voiceSearchLabel,
         'is_active': isActive,
         'is_deleted': isDeleted,
       };
@@ -65,11 +68,12 @@ class ServiceItem {
         modelId: map['model_id'] as int?,
         price: (map['price'] as num).toDouble(),
         notes: map['notes'] as String?,
+        voiceSearchLabel: map['voice_search_label'] as String?,
         isActive: map['is_active'] as int? ?? 1,
         isDeleted: map['is_deleted'] as int? ?? 0,
       );
 
-  ServiceItem copyWith({double? price}) => ServiceItem(
+  ServiceItem copyWith({double? price, String? voiceSearchLabel}) => ServiceItem(
         id: id,
         name: name,
         code: code,
@@ -78,6 +82,7 @@ class ServiceItem {
         modelId: modelId,
         price: price ?? this.price,
         notes: notes,
+        voiceSearchLabel: voiceSearchLabel ?? this.voiceSearchLabel,
         isActive: isActive,
         isDeleted: isDeleted,
       );
