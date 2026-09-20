@@ -88,18 +88,21 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       itemCount: _products.length,
                       itemBuilder: (context, i) {
                         final p = _products[i];
-                        return Card(
-                          color: p.isLowStock ? Colors.red.shade50 : null,
-                          child: ListTile(
-                            leading: CircleAvatar(
-                                backgroundColor: p.isLowStock ? Colors.red.shade100 : null,
-                                child: Icon(p.isLowStock ? Icons.warning_amber : Icons.inventory_2_outlined)),
-                            title: Text(p.name),
-                            subtitle: Text(
-                                'موجودی: ${PersianDateUtil.toPersianDigits('${p.stock}')}'
-                                '${p.barcode != null ? ' - بارکد: ${p.barcode}' : ''}'),
-                            trailing: Text(CurrencyFormatter.format(p.sellPrice, _currency)),
-                            onTap: () => _openForm(product: p),
+                        return GestureDetector(
+                          onLongPress: () => _showProductActions(p),
+                          child: Card(
+                            color: p.isLowStock ? Colors.red.shade50 : null,
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                  backgroundColor: p.isLowStock ? Colors.red.shade100 : null,
+                                  child: Icon(p.isLowStock ? Icons.warning_amber : Icons.inventory_2_outlined)),
+                              title: Text(p.name),
+                              subtitle: Text(
+                                  'موجودی: ${PersianDateUtil.toPersianDigits('${p.stock}')}'
+                                  '${p.barcode != null ? ' - بارکد: ${p.barcode}' : ''}'),
+                              trailing: Text(CurrencyFormatter.format(p.sellPrice, _currency)),
+                              onTap: () => _openForm(product: p),
+                            ),
                           ),
                         );
                       },
