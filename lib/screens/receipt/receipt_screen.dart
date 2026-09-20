@@ -42,7 +42,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   final _notesCtrl = TextEditingController();
 
   InvoiceType _type = InvoiceType.electrical;
-  PaymentType _paymentType = PaymentType.cash;
+  PaymentType _paymentType = PaymentType.onlinePayment;
   PaymentAccount? _selectedAccount;
   DateTime? _checkDueDate;
   List<PaymentAccount> _accounts = [];
