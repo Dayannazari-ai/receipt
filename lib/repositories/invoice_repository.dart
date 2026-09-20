@@ -90,6 +90,16 @@ class InvoiceRepository {
     final rows = await db.query('invoices', where: 'id = ?', whereArgs: [id]);
     return rows.isEmpty ? null : Invoice.fromMap(rows.first);
   }
+  /// همه‌ی فاکتورهای یک مشتری خاص، بر اساس شناسه‌ی واقعی مشتری (نه نام).
+  /// جدیدترین فاکتور اول نمایش داده می‌شود.
+  Future<List<Invoice>> getByCustomerId(int customerId) async {
+    final db = await _db.database;
+    final rows = await db.query('invoices',
+        where: 'customer_id = ? AND is_deleted = 0',
+        whereArgs: [customerId],
+        orderBy: 'issue_date DESC');
+    return rows.map((r) => Invoice.fromMap(r)).toList();
+  }
 
   Future<List<InvoiceItem>> getItems(int invoiceId) async {
     final db = await _db.database;
