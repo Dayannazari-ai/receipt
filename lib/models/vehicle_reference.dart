@@ -3,13 +3,17 @@
 class VehicleBrand {
   final int? id;
   final String name;
+  final int isDeleted;
 
-  VehicleBrand({this.id, required this.name});
+  VehicleBrand({this.id, required this.name, this.isDeleted = 0});
 
-  Map<String, dynamic> toMap() => {'id': id, 'name': name};
+  Map<String, dynamic> toMap() => {'id': id, 'name': name, 'is_deleted': isDeleted};
 
-  factory VehicleBrand.fromMap(Map<String, dynamic> map) =>
-      VehicleBrand(id: map['id'] as int?, name: map['name'] as String);
+  factory VehicleBrand.fromMap(Map<String, dynamic> map) => VehicleBrand(
+        id: map['id'] as int?,
+        name: map['name'] as String,
+        isDeleted: map['is_deleted'] as int? ?? 0,
+      );
 }
 
 /// مدل خودرو، وابسته به یک برند.
