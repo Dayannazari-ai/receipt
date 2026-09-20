@@ -48,6 +48,48 @@ class _ProductsScreenState extends State<ProductsScreen> {
         .push(MaterialPageRoute(builder: (_) => ProductFormScreen(product: product)));
     _load();
   }
+  Future<void> _showProductActions(Product product) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('ویرایش'),
+            onTap: () => Navigator.pop(ctx, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.red),
+            title: const Text('حذف', style: TextStyle(color: Colors.red)),
+            onTap: () => Navigator.pop(ctx, 'delete'),
+          ),
+        ]),
+      ),
+    );
+    if (action == 'edit') {
+      _openForm(product: product);
+    } else if (action == 'delete') {
+      _confirmDeleteProduct(product);
+    }
+  }
+
+  Future<void> _confirmDeleteProduct(Product product) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('حذف کالا'),
+        content: const Text('آیا از حذف این کالا مطمئن هستید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _repo.softDelete(product.id!);
+      _load();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
