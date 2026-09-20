@@ -3,6 +3,8 @@ import '../../models/product.dart';
 import '../../repositories/product_repository.dart';
 import '../../utils/validators.dart';
 import 'barcode_scanner_screen.dart';
+import '../voice_search_sheet.dart';
+import '../../services/voice_search_service.dart';
 
 class ProductFormScreen extends StatefulWidget {
   final Product? product;
@@ -19,6 +21,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _codeCtrl;
   late final TextEditingController _barcodeCtrl;
+  late final TextEditingController _voiceLabelCtrl;
   late final TextEditingController _purchaseCtrl;
   late final TextEditingController _sellCtrl;
   late final TextEditingController _stockCtrl;
@@ -35,6 +38,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _nameCtrl = TextEditingController(text: p?.name ?? '');
     _codeCtrl = TextEditingController(text: p?.code ?? '');
     _barcodeCtrl = TextEditingController(text: p?.barcode ?? widget.initialBarcode ?? '');
+    _voiceLabelCtrl = TextEditingController(text: p?.voiceSearchLabel ?? '');
     _purchaseCtrl = TextEditingController(text: p?.purchasePrice.toStringAsFixed(0) ?? '');
     _sellCtrl = TextEditingController(text: p?.sellPrice.toStringAsFixed(0) ?? '');
     _stockCtrl = TextEditingController(text: p?.stock.toString() ?? '0');
@@ -47,6 +51,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
     );
     if (result != null) setState(() => _barcodeCtrl.text = result);
+  }
+  Future<void> _recordVoiceLabel() async {
+    final text = await VoiceSearchService().listenOnce();
+    if (text == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('تشخیص گفتار در دسترس نیست یا صدایی شناسایی نشد.')));
+      }
+      return;
+    }
+    setState(() => _voiceLabelCtrl.text = text);
   }
 
   Future<void> _save() async {
@@ -97,6 +112,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         name: _nameCtrl.text.trim(),
         code: _codeCtrl.text.trim(),
         barcode: barcode.isEmpty ? null : barcode,
+        voiceSearchLabel: _voiceLabelCtrl.text.trim().isEmpty ? null : _voiceLabelCtrl.text.trim(),
         purchasePrice: double.parse(_purchaseCtrl.text.replaceAll(',', '')),
         sellPrice: double.parse(_sellCtrl.text.replaceAll(',', '')),
         stock: int.parse(_stockCtrl.text),
@@ -170,6 +186,21 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               icon: const Icon(Icons.qr_code_scanner),
               label: const Text('اسکن'),
               onPressed: _scanBarcode,
+            ),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: TextFormField(
+                controller: _voiceLabelCtrl,
+                decoration: const InputDecoration(labelText: 'برچسب جستجوی صوتی (اختیاری)'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.mic_none),
+              label: const Text('ضبط'),
+              onPressed: _recordVoiceLabel,
             ),
           ]),
           const SizedBox(height: 12),
