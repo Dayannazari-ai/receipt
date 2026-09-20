@@ -112,6 +112,48 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
     if (saved == true) _load();
   }
+  Future<void> _showServiceActions(ServiceItem service) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('ویرایش'),
+            onTap: () => Navigator.pop(ctx, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.red),
+            title: const Text('حذف', style: TextStyle(color: Colors.red)),
+            onTap: () => Navigator.pop(ctx, 'delete'),
+          ),
+        ]),
+      ),
+    );
+    if (action == 'edit') {
+      _addOrEditService(service: service);
+    } else if (action == 'delete') {
+      _confirmDeleteService(service);
+    }
+  }
+
+  Future<void> _confirmDeleteService(ServiceItem service) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('حذف خدمت'),
+        content: const Text('آیا از حذف این خدمت مطمئن هستید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _serviceRepo.softDelete(service.id!);
+      _load();
+    }
+  }
 
   String _brandLabel(ServiceItem s) {
     if (s.brandId == null) return 'همه برندها';
@@ -199,12 +241,14 @@ class _ServicesScreenState extends State<ServicesScreen> {
                           title: Text(cat.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                           children: list.isEmpty
                               ? [const ListTile(title: Text('خدمتی ثبت نشده'))]
-                              : list
-                                  .map((s) => ListTile(
-                                        title: Text(s.name),
-                                        subtitle: Text(_brandLabel(s)),
-                                        trailing: Text(CurrencyFormatter.format(s.price, _currency)),
-                                        onTap: () => _addOrEditService(service: s),
+                              : list.map((s) => GestureDetector(
+                                        onLongPress: () => _showServiceActions(s),
+                                        child: ListTile(
+                                          title: Text(s.name),
+                                          subtitle: Text(_brandLabel(s)),
+                                          trailing: Text(CurrencyFormatter.format(s.price, _currency)),
+                                          onTap: () => _addOrEditService(service: s),
+                                        ),
                                       ))
                                   .toList(),
                         );
