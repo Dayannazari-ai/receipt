@@ -11,7 +11,7 @@ class DatabaseHelper {
   // نسخه ۲: افزودن ستون voice_search_label به products و services برای
   // قابلیت جستجوی صوتی. این تغییر با Migration امن (ALTER TABLE) انجام
   // می‌شود و هیچ داده‌ی قبلی کاربران حذف یا بازنویسی نمی‌شود.
-  static const int dbVersion = 2;
+  static const int dbVersion = 3;
 
   Database? _db;
 
@@ -53,7 +53,8 @@ class DatabaseHelper {
     batch.execute('''
       CREATE TABLE vehicle_brands (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL
+        name TEXT NOT NULL,
+        is_deleted INTEGER NOT NULL DEFAULT 0
       )
     ''');
     batch.execute('''
@@ -223,6 +224,11 @@ class DatabaseHelper {
       } catch (_) {}
       try {
         await db.execute('ALTER TABLE services ADD COLUMN voice_search_label TEXT');
+      } catch (_) {}
+    }
+    if (oldVersion < 3) {
+      try {
+        await db.execute('ALTER TABLE vehicle_brands ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
       } catch (_) {}
     }
   }
