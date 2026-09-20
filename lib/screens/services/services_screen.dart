@@ -3,6 +3,8 @@ import '../../models/service.dart';
 import '../../models/vehicle_reference.dart';
 import '../../repositories/service_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
+import '../voice_search_sheet.dart';
+import '../../services/voice_search_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../repositories/settings_repository.dart';
 import '../../models/app_settings.dart';
@@ -235,6 +237,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _codeCtrl;
   late final TextEditingController _priceCtrl;
+  late final TextEditingController _voiceLabelCtrl;
   int? _categoryId;
   int? _brandId;
   int? _modelId;
@@ -251,6 +254,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     _nameCtrl = TextEditingController(text: s?.name ?? '');
     _codeCtrl = TextEditingController(text: s?.code ?? '');
     _priceCtrl = TextEditingController(text: s?.price.toStringAsFixed(0) ?? '');
+    _voiceLabelCtrl = TextEditingController(text: s?.voiceSearchLabel ?? '');
     _categoryId = s?.categoryId ?? widget.categories.first.id;
     _brandId = s?.brandId;
     _modelId = s?.modelId;
@@ -315,6 +319,17 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     );
     setState(() => _modelId = selected);
   }
+  Future<void> _recordVoiceLabel() async {
+    final text = await VoiceSearchService().listenOnce();
+    if (text == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('تشخیص گفتار در دسترس نیست یا صدایی شناسایی نشد.')));
+      }
+      return;
+    }
+    setState(() => _voiceLabelCtrl.text = text);
+  }
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty || _codeCtrl.text.trim().isEmpty) return;
@@ -338,7 +353,9 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
       brandId: _brandId,
       modelId: _modelId,
       price: price,
-    );
+      voiceSearchLabel: _voiceLabelCtrl.text.trim().isEmpty ? null : _voiceLabelCtrl.text.trim(),
+    );,
+    
     if (_isEdit) {
       await _serviceRepo.update(widget.service!, newItem);
     } else {
@@ -399,6 +416,21 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
               controller: _priceCtrl,
               decoration: const InputDecoration(labelText: 'قیمت'),
               keyboardType: TextInputType.number),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _voiceLabelCtrl,
+                decoration: const InputDecoration(labelText: 'برچسب جستجوی صوتی (اختیاری)'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.mic_none),
+              label: const Text('ضبط'),
+              onPressed: _recordVoiceLabel,
+            ),
+          ]),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _saving ? null : _save,
