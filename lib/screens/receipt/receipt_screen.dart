@@ -19,6 +19,7 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../invoices/invoice_detail_screen.dart';
 import '../products/barcode_scanner_screen.dart';
+import '../voice_search_sheet.dart';
 import '../products/product_form_screen.dart';
 
 /// صفحه‌ی اصلی «رسید»: صدور فاکتور با انتخاب نوع، مشتری، اقلام، هزینه جانبی و نوع پرداخت.
@@ -190,7 +191,36 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       }
     }
   }
-
+  
+/// جستجوی صوتی کالا/خدمت و افزودن مستقیم به فاکتور.
+  Future<void> _voiceSearchForItem() async {
+    final scope = _type.isServiceType ? VoiceSearchScope.services : VoiceSearchScope.products;
+    final result = await showModalBottomSheet<VoiceSearchResult>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => VoiceSearchSheet(scope: scope),
+    );
+    if (result == null) return;
+    if (result.service != null) {
+      final s = result.service!;
+      setState(() => _lines.add(InvoiceCartLine(
+            itemType: InvoiceItemType.service,
+            serviceId: s.id,
+            description: s.name,
+            quantity: 1,
+            unitPrice: s.price,
+          )));
+    } else if (result.product != null) {
+      final p = result.product!;
+      setState(() => _lines.add(InvoiceCartLine(
+            itemType: InvoiceItemType.product,
+            productId: p.id,
+            description: p.name,
+            quantity: 1,
+            unitPrice: p.sellPrice,
+          )));
+    }
+  }
   Future<void> _editLinePrice(int index) async {
     final line = _lines[index];
     final priceCtrl = TextEditingController(text: line.unitPrice.toStringAsFixed(0));
@@ -411,7 +441,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             TextButton.icon(
               icon: const Icon(Icons.mic_none, size: 18),
               label: const Text('دستور صوتی'),
-              onPressed: () => _showMsg('دستور صوتی به‌زودی اضافه می‌شود'),
+              onPressed: _voiceSearchForItem,
             ),
             TextButton.icon(
               icon: const Icon(Icons.qr_code_scanner, size: 18),
