@@ -354,7 +354,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
       modelId: _modelId,
       price: price,
       voiceSearchLabel: _voiceLabelCtrl.text.trim().isEmpty ? null : _voiceLabelCtrl.text.trim(),
-    );,
+    );
     
     if (_isEdit) {
       await _serviceRepo.update(widget.service!, newItem);
