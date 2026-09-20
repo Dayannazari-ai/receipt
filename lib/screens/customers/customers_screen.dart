@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/customer.dart';
 import '../../repositories/customer_repository.dart';
 import '../../utils/persian_date.dart';
+import 'customer_history_screen.dart';
 
 class CustomersScreen extends StatefulWidget {
   const CustomersScreen({super.key});
@@ -143,6 +144,12 @@ class _CustomersScreenState extends State<CustomersScreen> {
                             ),
                             title: Text(c.name),
                             subtitle: Text(PersianDateUtil.toPersianDigits(c.mobile)),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.receipt_long_outlined),
+                              tooltip: 'سوابق فاکتورها',
+                              onPressed: () => Navigator.of(context)
+                                  .push(MaterialPageRoute(builder: (_) => CustomerHistoryScreen(customer: c))),
+                            ),
                             onTap: () => _addOrEdit(customer: c),
                           ),
                         );
