@@ -14,7 +14,7 @@ jobs:
           channel: stable
       - name: Create android scaffold
         run: flutter create --platforms=android --project-name receipt_app .
-        - name: Add RECORD_AUDIO permission for speech_to_text
+      - name: Add RECORD_AUDIO permission for speech_to_text
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           grep -q 'RECORD_AUDIO' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.RECORD_AUDIO" />' "$MANIFEST"
