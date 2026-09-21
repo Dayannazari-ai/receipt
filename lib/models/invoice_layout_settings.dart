@@ -1,13 +1,23 @@
 /// تمام مقادیر ظاهری فاکتور PDF در همین‌جا متمرکز شده‌اند تا در آینده
 /// بتوان یک صفحه‌ی «تنظیمات قالب فاکتور» با اسلایدر ساخت که همین مقادیر
 /// را (بدون نیاز به تغییر کد) عوض کند. فعلاً فقط مقادیر پیش‌فرض استفاده
-/// می‌شوند؛ pdf_service.dart هیچ عدد ثابتی مستقیم در خودش ندارد.
+/// می‌شوند؛ pdf_service.dart هیچ عدد یا رنگ ثابتی مستقیم در خودش ندارد.
 class InvoiceLayoutSettings {
+  // ---------- رنگ‌بندی (کد رنگ ARGB/RGB به‌صورت int) ----------
+  final int colorOrange;
+  final int colorDarkGray;
+  final int colorLightGray;
+  final int colorWhite;
+
+  // ---------- نوار تزئینی بالای سربرگ ----------
+  final double topBarHeight;
+
   // ---------- سربرگ ----------
-  final double headerLogoSize;
+  final double logoPlaceholderSize;
   final double headerCompanyNameFontSize;
   final double headerSubTitleFontSize;
   final double headerContactFontSize;
+  final double headerInfoFontSize;
   final double headerSpacingAfter;
 
   // ---------- فاصله از لبه‌های کاغذ ----------
@@ -24,10 +34,10 @@ class InvoiceLayoutSettings {
   final double tableHeaderFontSize;
   final double tableCellFontSize;
   final double tableRowVerticalPadding;
-  final double colWidthRow; // ستون ردیف
-  final double colWidthDescription; // ستون شرح (عریض‌ترین)
-  final double colWidthUnitPrice; // ستون قیمت واحد
-  final double colWidthTotalPrice; // ستون قیمت کل
+  final double colWidthRow;
+  final double colWidthDescription;
+  final double colWidthUnitPrice;
+  final double colWidthTotalPrice;
   final double spacingAfterTable;
 
   // ---------- جمع کل (خارج از جدول) ----------
@@ -40,6 +50,7 @@ class InvoiceLayoutSettings {
   final double termsFontSize;
   final double termsLineSpacing;
   final int termsColumnCount;
+  final double termsBoxPadding;
   final double spacingAfterTerms;
 
   // ---------- امضا و مهر ----------
@@ -47,14 +58,23 @@ class InvoiceLayoutSettings {
   final double signatureLabelFontSize;
   final double stampImageSize;
 
+  // ---------- نوار تزئینی پایین صفحه ----------
+  final double bottomBarHeight;
+
   const InvoiceLayoutSettings({
-    this.headerLogoSize = 26,
+    this.colorOrange = 0xFFE87722,
+    this.colorDarkGray = 0xFF2B2B2B,
+    this.colorLightGray = 0xFFF3F3F3,
+    this.colorWhite = 0xFFFFFFFF,
+    this.topBarHeight = 4,
+    this.logoPlaceholderSize = 34,
     this.headerCompanyNameFontSize = 11,
     this.headerSubTitleFontSize = 7,
     this.headerContactFontSize = 7,
-    this.headerSpacingAfter = 4,
+    this.headerInfoFontSize = 7.5,
+    this.headerSpacingAfter = 5,
     this.pageMarginHorizontal = 12,
-    this.pageMarginVertical = 10,
+    this.pageMarginVertical = 0,
     this.customerBoxFontSize = 8,
     this.customerBoxPadding = 4,
     this.spacingAfterCustomerBox = 6,
@@ -72,11 +92,13 @@ class InvoiceLayoutSettings {
     this.spacingAfterTotals = 6,
     this.termsTitleFontSize = 7.5,
     this.termsFontSize = 6.3,
-    this.termsLineSpacing = 1.5,
+    this.termsLineSpacing = 3,
     this.termsColumnCount = 2,
+    this.termsBoxPadding = 5,
     this.spacingAfterTerms = 6,
     this.signatureLineWidth = 90,
     this.signatureLabelFontSize = 7.5,
-    this.stampImageSize = 55,
+    this.stampImageSize = 50,
+    this.bottomBarHeight = 4,
   });
 }
