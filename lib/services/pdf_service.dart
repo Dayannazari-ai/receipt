@@ -7,18 +7,23 @@ import 'package:printing/printing.dart';
 import '../models/app_settings.dart';
 import '../models/customer.dart';
 import '../models/invoice.dart';
+import '../models/invoice_layout_settings.dart';
 import '../utils/currency_formatter.dart';
 import '../utils/persian_date.dart';
 
-/// تولید فاکتور PDF فارسی/RTL در سایز A5.
+/// تولید فاکتور PDF فارسی/RTL در سایز A5 عمودی، فشرده و حرفه‌ای.
+///
+/// تمام اندازه‌ها و فاصله‌ها از [InvoiceLayoutSettings] خوانده می‌شوند تا در
+/// آینده بدون تغییر این فایل، از داخل برنامه قابل تنظیم باشند.
 ///
 /// ⚠️ برای نمایش صحیح فارسی، حتماً این دو فایل باید در مسیر زیر همین پروژه
-/// (نه پروژه‌ی قدیمی!) وجود داشته باشند، وگرنه متن به‌صورت مربع/باکس دیده می‌شود:
+/// وجود داشته باشند، وگرنه متن به‌صورت مربع/باکس دیده می‌شود:
 ///   assets/fonts/Vazirmatn-Regular.ttf
 ///   assets/fonts/Vazirmatn-Bold.ttf
 class PdfService {
   static pw.Font? _regularFont;
   static pw.Font? _boldFont;
+  static const _layout = InvoiceLayoutSettings();
 
   static Future<void> _loadFonts() async {
     if (_regularFont != null) return;
@@ -61,51 +66,21 @@ class PdfService {
         theme: theme,
         textDirection: pw.TextDirection.rtl,
         pageFormat: PdfPageFormat.a5,
-        margin: const pw.EdgeInsets.all(20),
+        margin: pw.EdgeInsets.symmetric(
+            horizontal: _layout.pageMarginHorizontal, vertical: _layout.pageMarginVertical),
         header: (context) => _header(settings, invoice),
         build: (context) => [
-          pw.SizedBox(height: 8),
           if (customer != null) _customerInfo(customer),
-          pw.SizedBox(height: 12),
-          pw.Text('اقلام فاکتور', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-          pw.SizedBox(height: 4),
+          pw.SizedBox(height: _layout.spacingAfterCustomerBox),
           _itemsTable(items),
-          if (sideCosts.isNotEmpty) ...[
-            pw.SizedBox(height: 8),
-            pw.Text('هزینه‌های جانبی', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
-            ...sideCosts.map((c) => pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [pw.Text(c.title, style: const pw.TextStyle(fontSize: 9)),
-                      pw.Text(CurrencyFormatter.format(c.amount, settings.currency), style: const pw.TextStyle(fontSize: 9))],
-                )),
-          ],
-          pw.SizedBox(height: 10),
+          if (sideCosts.isNotEmpty) ..._sideCostsSection(sideCosts, settings),
+          pw.SizedBox(height: _layout.spacingAfterTable),
           _totals(invoice, settings),
-          if ((invoice.notes ?? '').isNotEmpty) ...[
-            pw.SizedBox(height: 10),
-            pw.Text('توضیحات:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
-            pw.Text(invoice.notes!, style: const pw.TextStyle(fontSize: 9)),
-          ],
-          pw.SizedBox(height: 16),
-          if (settings.termsText.isNotEmpty) ...[
-            pw.Divider(),
-            pw.Text('نکات مهم:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
-            pw.Text(settings.termsText, style: const pw.TextStyle(fontSize: 8)),
-            pw.SizedBox(height: 10),
-          ],
-          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              pw.Text('امضای مشتری:', style: const pw.TextStyle(fontSize: 9)),
-              pw.SizedBox(height: 24),
-              pw.Container(width: 120, height: 0.5, color: PdfColors.grey600),
-            ]),
-            if (stampImage != null)
-              pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-                pw.Text('مهر و امضای کارگاه:', style: const pw.TextStyle(fontSize: 9)),
-                pw.SizedBox(height: 4),
-                pw.Image(stampImage, width: 80, height: 80),
-              ]),
-          ]),
+          if ((invoice.notes ?? '').isNotEmpty) ..._notesSection(invoice.notes!),
+          pw.SizedBox(height: _layout.spacingAfterTotals),
+          if (settings.termsText.isNotEmpty) _termsSection(settings.termsText),
+          pw.SizedBox(height: _layout.spacingAfterTerms),
+          _signatureRow(stampImage),
         ],
       ),
     );
@@ -117,74 +92,213 @@ class PdfService {
     return file;
   }
 
+  /// سربرگ فشرده: سمت راست اطلاعات فاکتور (تاریخ/شماره/نوع)، سمت چپ نام و تماس مجموعه.
   static pw.Widget _header(AppSettings settings, Invoice invoice) {
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-      pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-        pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-          pw.Text('${invoice.type.label} - شماره ${PersianDateUtil.toPersianDigits(invoice.invoiceNumber)}',
-              style: const pw.TextStyle(fontSize: 10)),
-          pw.Text('تاریخ: ${PersianDateUtil.formatDateNumeric(invoice.issueDate)}',
-              style: const pw.TextStyle(fontSize: 10)),
-        ]),
-        pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-          pw.Text(settings.shopName, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-          if (settings.contactNumber.isNotEmpty)
-            pw.Text(settings.contactNumber, style: const pw.TextStyle(fontSize: 9)),
-        ]),
-      ]),
-      pw.SizedBox(height: 6),
-      pw.Divider(),
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            _headerInfoLine('تاریخ', PersianDateUtil.formatDateNumeric(invoice.issueDate)),
+            _headerInfoLine('شماره فاکتور', PersianDateUtil.toPersianDigits(invoice.invoiceNumber)),
+            _headerInfoLine('نوع فاکتور', invoice.type.label),
+          ]),
+          pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+            pw.Text(settings.shopName,
+                style: pw.TextStyle(
+                    fontSize: _layout.headerCompanyNameFontSize, fontWeight: pw.FontWeight.bold)),
+            if (settings.contactNumber.isNotEmpty)
+              pw.Text(PersianDateUtil.toPersianDigits(settings.contactNumber),
+                  style: pw.TextStyle(fontSize: _layout.headerContactFontSize)),
+            if (settings.address.isNotEmpty)
+              pw.Text(settings.address,
+                  style: pw.TextStyle(fontSize: _layout.headerSubTitleFontSize, color: PdfColors.grey700)),
+          ]),
+        ],
+      ),
+      pw.SizedBox(height: _layout.headerSpacingAfter),
+      pw.Divider(thickness: 0.7, color: PdfColors.grey700),
     ]);
   }
 
+  static pw.Widget _headerInfoLine(String label, String value) => pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 0.5),
+        child: pw.Text('$label: $value', style: pw.TextStyle(fontSize: 7.5)),
+      );
+
   static pw.Widget _customerInfo(Customer c) {
     return pw.Container(
-      padding: const pw.EdgeInsets.all(6),
-      decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400)),
-      child: pw.Row(children: [
-        pw.Text('مشتری: ${c.name}   ', style: const pw.TextStyle(fontSize: 9)),
-        pw.Text('موبایل: ${PersianDateUtil.toPersianDigits(c.mobile)}', style: const pw.TextStyle(fontSize: 9)),
+      padding: pw.EdgeInsets.all(_layout.customerBoxPadding),
+      decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400, width: 0.6)),
+      child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+        pw.Text('مشتری: ${c.name}', style: pw.TextStyle(fontSize: _layout.customerBoxFontSize)),
+        pw.Text('موبایل: ${PersianDateUtil.toPersianDigits(c.mobile)}',
+            style: pw.TextStyle(fontSize: _layout.customerBoxFontSize)),
       ]),
     );
   }
 
+  /// جدول اقلام: فقط ۴ ستون (ردیف / شرح / قیمت واحد / قیمت کل)، بدون ستون تخفیف.
+  /// حداقل تعداد ردیف طبق [InvoiceLayoutSettings.tableMinRows] با ردیف‌های خالی پر می‌شود
+  /// تا ظاهر فاکتور همیشه یکدست باشد، حتی وقتی اقلام کمتر از حداقل هستند.
   static pw.Widget _itemsTable(List<InvoiceItem> items) {
-    return pw.TableHelper.fromTextArray(
-      headers: ['ردیف', 'شرح', 'تعداد', 'قیمت واحد', 'مبلغ کل'],
-      data: List.generate(items.length, (i) {
-        final it = items[i];
-        return [
-          PersianDateUtil.toPersianDigits('${i + 1}'),
-          it.description,
-          PersianDateUtil.toPersianDigits('${it.quantity}'),
-          CurrencyFormatter.formatPlain(it.unitPrice),
-          CurrencyFormatter.formatPlain(it.total),
-        ];
-      }),
-      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
-      cellStyle: const pw.TextStyle(fontSize: 8),
-      cellAlignment: pw.Alignment.center,
-      headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
+    final rowCount = items.length > _layout.tableMinRows.toInt() ? items.length : _layout.tableMinRows.toInt();
+
+    pw.Widget cell(String text, {bool isHeader = false}) => pw.Padding(
+          padding: pw.EdgeInsets.symmetric(vertical: _layout.tableRowVerticalPadding, horizontal: 2),
+          child: pw.Text(text,
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(
+                  fontSize: isHeader ? _layout.tableHeaderFontSize : _layout.tableCellFontSize,
+                  fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal)),
+        );
+
+    pw.TableRow row(List<String> values, {bool isHeader = false}) => pw.TableRow(
+          decoration: isHeader ? const pw.BoxDecoration(color: PdfColor.fromInt(0xFF2B2B2B)) : null,
+          children: values
+              .map((v) => isHeader
+                  ? pw.Container(
+                      alignment: pw.Alignment.center,
+                      padding: pw.EdgeInsets.symmetric(vertical: _layout.tableRowVerticalPadding + 1),
+                      child: pw.Text(v,
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(
+                              fontSize: _layout.tableHeaderFontSize,
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.white)),
+                    )
+                  : cell(v))
+              .toList(),
+        );
+
+    return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+      columnWidths: {
+        0: pw.FlexColumnWidth(_layout.colWidthRow),
+        1: pw.FlexColumnWidth(_layout.colWidthDescription),
+        2: pw.FlexColumnWidth(_layout.colWidthUnitPrice),
+        3: pw.FlexColumnWidth(_layout.colWidthTotalPrice),
+      },
+      children: [
+        row(['ردیف', 'شرح', 'قیمت واحد', 'قیمت کل'], isHeader: true),
+        for (var i = 0; i < rowCount; i++)
+          i < items.length
+              ? row([
+                  PersianDateUtil.toPersianDigits('${i + 1}'),
+                  items[i].description,
+                  CurrencyFormatter.formatPlain(items[i].unitPrice),
+                  CurrencyFormatter.formatPlain(items[i].total),
+                ])
+              : row([PersianDateUtil.toPersianDigits('${i + 1}'), '', '', '']),
+      ],
     );
   }
 
+  static List<pw.Widget> _sideCostsSection(List<SideCost> sideCosts, AppSettings settings) {
+    return [
+      pw.SizedBox(height: 4),
+      pw.Text('هزینه‌های جانبی', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)),
+      ...sideCosts.map((c) => pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(c.title, style: const pw.TextStyle(fontSize: 7.5)),
+              pw.Text(CurrencyFormatter.format(c.amount, settings.currency),
+                  style: const pw.TextStyle(fontSize: 7.5)),
+            ],
+          )),
+    ];
+  }
+
+  static List<pw.Widget> _notesSection(String notes) {
+    return [
+      pw.SizedBox(height: 4),
+      pw.Text('توضیحات: $notes', style: const pw.TextStyle(fontSize: 7)),
+    ];
+  }
+
+  /// جمع کل فاکتور، مستقل و خارج از جدول اقلام.
   static pw.Widget _totals(Invoice invoice, AppSettings settings) {
-    pw.Widget row(String label, double amount, {bool bold = false}) => pw.Padding(
-          padding: const pw.EdgeInsets.symmetric(vertical: 1),
-          child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-            pw.Text(label, style: pw.TextStyle(fontSize: 9, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
-            pw.Text(CurrencyFormatter.format(amount, settings.currency),
-                style: pw.TextStyle(fontSize: 9, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
-          ]),
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey500, width: 0.7),
+        color: PdfColors.grey100,
+      ),
+      child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+        pw.Text('جمع کل فاکتور',
+            style: pw.TextStyle(fontSize: _layout.totalsBoldFontSize, fontWeight: pw.FontWeight.bold)),
+        pw.Text(CurrencyFormatter.format(invoice.finalAmount, settings.currency),
+            style: pw.TextStyle(fontSize: _layout.totalsBoldFontSize, fontWeight: pw.FontWeight.bold)),
+      ]),
+    );
+  }
+
+  /// نکات مهم به‌صورت دو‌ستونه و فشرده، طبق [InvoiceLayoutSettings.termsColumnCount].
+  static pw.Widget _termsSection(String termsText) {
+    final lines = termsText.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    if (lines.isEmpty) return pw.SizedBox();
+
+    final columnCount = _layout.termsColumnCount.clamp(1, 3);
+    final perColumn = (lines.length / columnCount).ceil();
+    final columns = <List<String>>[];
+    for (var i = 0; i < columnCount; i++) {
+      final start = i * perColumn;
+      if (start >= lines.length) break;
+      final end = (start + perColumn).clamp(0, lines.length);
+      columns.add(lines.sublist(start, end));
+    }
+
+    pw.Widget bullet(String text) => pw.Padding(
+          padding: pw.EdgeInsets.only(bottom: _layout.termsLineSpacing),
+          child: pw.Text('• $text', style: pw.TextStyle(fontSize: _layout.termsFontSize)),
         );
+
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-      row('جمع اقلام', invoice.itemsTotal),
-      row('هزینه جانبی', invoice.sideCosts),
-      pw.Divider(),
-      row('جمع فاکتور', invoice.finalAmount, bold: true),
-      pw.SizedBox(height: 3),
-      pw.Text('نوع پرداخت: ${invoice.paymentType.label}', style: const pw.TextStyle(fontSize: 9)),
+      pw.Text('نکات مهم:',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: _layout.termsTitleFontSize)),
+      pw.SizedBox(height: 2),
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: columns
+            .map((col) => pw.Expanded(
+                  child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start, children: col.map(bullet).toList()),
+                ))
+            .toList(),
+      ),
+    ]);
+  }
+
+  static pw.Widget _signatureRow(pw.MemoryImage? stampImage) {
+    pw.Widget signatureBox(String label) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
+          pw.Container(
+            height: 28,
+            decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey500, width: 0.6)),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(label,
+              textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: _layout.signatureLabelFontSize)),
+        ]);
+
+    return pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      pw.Expanded(child: signatureBox('امضای مشتری')),
+      pw.SizedBox(width: 10),
+      pw.Expanded(
+        child: stampImage != null
+            ? pw.Column(children: [
+                pw.Container(
+                  height: _layout.stampImageSize,
+                  alignment: pw.Alignment.center,
+                  child: pw.Image(stampImage, height: _layout.stampImageSize),
+                ),
+                pw.SizedBox(height: 2),
+                pw.Text('مهر و امضای کارگاه',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(fontSize: _layout.signatureLabelFontSize)),
+              ])
+            : signatureBox('مهر و امضای کارگاه'),
+      ),
     ]);
   }
 
