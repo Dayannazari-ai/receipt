@@ -332,6 +332,22 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
           await _loadBrands();
           return id;
         },
+        onEdit: (id, newName) async {
+          await _vehicleRepo.updateBrand(id, newName);
+          await _loadBrands();
+        },
+        onDelete: (id) async {
+          await _vehicleRepo.deleteBrand(id);
+          await _loadBrands();
+          if (_brandId == id) {
+            setState(() {
+              _brandId = null;
+              _modelId = null;
+              _models = [];
+            });
+          }
+          return true;
+        },
       ),
     );
     if (selected != _brandId) {
@@ -508,7 +524,15 @@ class _PickerSheet extends StatefulWidget {
   final String title;
   final List<_PickerItem> items;
   final Future<int> Function(String name) onAddNew;
-  const _PickerSheet({required this.title, required this.items, required this.onAddNew});
+  final Future<void> Function(int id, String newName)? onEdit;
+  final Future<bool> Function(int id)? onDelete;
+  const _PickerSheet({
+    required this.title,
+    required this.items,
+    required this.onAddNew,
+    this.onEdit,
+    this.onDelete,
+  });
 
   @override
   State<_PickerSheet> createState() => _PickerSheetState();
@@ -516,6 +540,62 @@ class _PickerSheet extends StatefulWidget {
 
 class _PickerSheetState extends State<_PickerSheet> {
   final _newCtrl = TextEditingController();
+
+  Future<void> _showItemActions(BuildContext context, _PickerItem item) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (widget.onEdit != null)
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('ویرایش'),
+              onTap: () => Navigator.pop(ctx, 'edit'),
+            ),
+          if (widget.onDelete != null)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('حذف', style: TextStyle(color: Colors.red)),
+              onTap: () => Navigator.pop(ctx, 'delete'),
+            ),
+        ]),
+      ),
+    );
+    if (action == 'edit' && widget.onEdit != null) {
+      final ctrl = TextEditingController(text: item.label);
+      final newName = await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('ویرایش نام'),
+          content: TextField(controller: ctrl),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('انصراف')),
+            TextButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('ذخیره')),
+          ],
+        ),
+      );
+      if (newName != null && newName.isNotEmpty) {
+        await widget.onEdit!(item.id!, newName);
+        if (context.mounted) setState(() {});
+      }
+    } else if (action == 'delete' && widget.onDelete != null) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('حذف برند'),
+          content: const Text('آیا از حذف این برند مطمئن هستید؟'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف', style: TextStyle(color: Colors.red))),
+          ],
+        ),
+      );
+      if (confirm == true) {
+        await widget.onDelete!(item.id!);
+        if (context.mounted) Navigator.pop(context, null);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -548,12 +628,13 @@ class _PickerSheetState extends State<_PickerSheet> {
           Expanded(
             child: ListView.builder(
               controller: scrollController,
-              itemCount: widget.items.length,
               itemBuilder: (context, i) {
                 final item = widget.items[i];
+                final canManage = item.id != null && (widget.onEdit != null || widget.onDelete != null);
                 return ListTile(
                   title: Text(item.label),
                   onTap: () => Navigator.pop(context, item.id),
+                  onLongPress: canManage ? () => _showItemActions(context, item) : null,
                 );
               },
             ),
