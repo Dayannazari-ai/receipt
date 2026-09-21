@@ -161,7 +161,13 @@ class PdfService {
         child: pw.Text('$label: $value', style: const pw.TextStyle(fontSize: 7.5)),
       );
 
-  static pw.Widget _bottomBar() => pw.Container(height: 4, color: PdfColor.fromInt(0xFFE87722));
+ static pw.Widget _bottomBar() => pw.SizedBox(
+        height: 10,
+        child: pw.Stack(children: [
+          pw.Container(width: double.infinity, height: 10, color: _darkGray),
+          pw.Positioned(bottom: 0, left: 0, child: pw.Container(width: 70, height: 10, color: _orange)),
+        ]),
+      );
 
   static pw.Widget _customerInfo(Customer c) {
     return pw.Container(
@@ -192,7 +198,7 @@ class PdfService {
 
     pw.TableRow headerRow() => pw.TableRow(
           decoration: pw.BoxDecoration(color: _darkGray),
-          children: ['ردیف', 'شرح', 'قیمت واحد', 'قیمت کل']
+          children: ['قیمت کل', 'قیمت واحد', 'شرح', 'ردیف']
               .map((v) => pw.Container(
                     alignment: pw.Alignment.center,
                     padding: pw.EdgeInsets.symmetric(vertical: _layout.tableRowVerticalPadding + 2),
@@ -211,25 +217,29 @@ class PdfService {
           children: values.map(cell).toList(),
         );
 
+    // نکته‌ی فنی مهم: ویجت Table جهت RTL سند را برای ترتیب فیزیکی ستون‌ها
+    // در نظر نمی‌گیرد (فقط جهت متن داخل هر سلول را درست می‌کند). برای اینکه
+    // «ردیف» فیزیکی سمت راست کاغذ و «قیمت کل» سمت چپ باشد، ترتیب لیست را
+    // دستی برعکس می‌کنیم: ایندکس ۰ = چپ‌ترین ستون (قیمت کل)، ایندکس ۳ = راست‌ترین (ردیف).
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
       columnWidths: {
-        0: pw.FlexColumnWidth(_layout.colWidthRow),
-        1: pw.FlexColumnWidth(_layout.colWidthDescription),
-        2: pw.FlexColumnWidth(_layout.colWidthUnitPrice),
-        3: pw.FlexColumnWidth(_layout.colWidthTotalPrice),
+        0: pw.FlexColumnWidth(_layout.colWidthTotalPrice),
+        1: pw.FlexColumnWidth(_layout.colWidthUnitPrice),
+        2: pw.FlexColumnWidth(_layout.colWidthDescription),
+        3: pw.FlexColumnWidth(_layout.colWidthRow),
       },
       children: [
         headerRow(),
         for (var i = 0; i < rowCount; i++)
           i < items.length
               ? dataRow([
-                  PersianDateUtil.toPersianDigits('${i + 1}'),
-                  items[i].description,
-                  CurrencyFormatter.formatPlain(items[i].unitPrice),
                   CurrencyFormatter.formatPlain(items[i].total),
+                  CurrencyFormatter.formatPlain(items[i].unitPrice),
+                  items[i].description,
+                  PersianDateUtil.toPersianDigits('${i + 1}'),
                 ], i.isEven)
-              : dataRow([PersianDateUtil.toPersianDigits('${i + 1}'), '', '', ''], i.isEven),
+              : dataRow(['', '', '', PersianDateUtil.toPersianDigits('${i + 1}')], i.isEven),
       ],
     );
   }
