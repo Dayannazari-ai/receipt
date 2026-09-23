@@ -11,19 +11,34 @@ import '../models/invoice_layout_settings.dart';
 import '../utils/currency_formatter.dart';
 import '../utils/persian_date.dart';
 
-/// تولید فاکتور PDF فارسی/RTL در سایز A5 عمودی، با هویت بصری نارنجی/خاکستری تیره.
+/// تولید فاکتور PDF فارسی/RTL در سایز A5 عمودی، با هویت بصری واقعی
+/// (لوگو و آیکون‌های تصویری از assets/) طبق تصویر مرجع.
 ///
-/// تمام اندازه‌ها، فاصله‌ها و رنگ‌ها از [InvoiceLayoutSettings] خوانده می‌شوند
-/// تا در آینده بدون تغییر این فایل، از داخل برنامه قابل تنظیم باشند.
+/// تمام اندازه‌ها، فاصله‌ها و رنگ‌ها از [InvoiceLayoutSettings] خوانده می‌شوند.
 ///
-/// ⚠️ برای نمایش صحیح فارسی، حتماً این دو فایل باید در مسیر زیر همین پروژه
-/// وجود داشته باشند، وگرنه متن به‌صورت مربع/باکس دیده می‌شود:
-///   assets/fonts/Vazirmatn-Regular.ttf
-///   assets/fonts/Vazirmatn-Bold.ttf
+/// ⚠️ برای نمایش صحیح فارسی، حتماً این دو فایل باید در assets/fonts وجود
+/// داشته باشند: Vazirmatn-Regular.ttf و Vazirmatn-Bold.ttf
+///
+/// تصاویر هویت بصری (در صورت نبودن هرکدام، به‌جایش یک بدیل ساده نمایش داده
+/// می‌شود و برنامه هرگز کرش نمی‌کند):
+///   assets/invoice_logo.png
+///   assets/invoice_bottom_accent.png
+///   assets/invoice_icons_row.png
+///   assets/invoice_important_icon.png
+///   assets/invoice_location_icon.png
+///   assets/invoice_phone_icon.png
 class PdfService {
   static pw.Font? _regularFont;
   static pw.Font? _boldFont;
   static const _layout = InvoiceLayoutSettings();
+
+  static pw.MemoryImage? _logoImage;
+  static pw.MemoryImage? _bottomAccentImage;
+  static pw.MemoryImage? _iconsRowImage;
+  static pw.MemoryImage? _importantIconImage;
+  static pw.MemoryImage? _locationIconImage;
+  static pw.MemoryImage? _phoneIconImage;
+  static bool _assetsLoaded = false;
 
   static PdfColor get _orange => PdfColor.fromInt(_layout.colorOrange);
   static PdfColor get _darkGray => PdfColor.fromInt(_layout.colorDarkGray);
@@ -42,6 +57,26 @@ class PdfService {
     }
   }
 
+  static Future<pw.MemoryImage?> _tryLoadImage(String assetPath) async {
+    try {
+      final data = await rootBundle.load(assetPath);
+      return pw.MemoryImage(data.buffer.asUint8List());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _loadImages() async {
+    if (_assetsLoaded) return;
+    _logoImage = await _tryLoadImage('assets/invoice_logo.png');
+    _bottomAccentImage = await _tryLoadImage('assets/invoice_bottom_accent.png');
+    _iconsRowImage = await _tryLoadImage('assets/invoice_icons_row.png');
+    _importantIconImage = await _tryLoadImage('assets/invoice_important_icon.png');
+    _locationIconImage = await _tryLoadImage('assets/invoice_location_icon.png');
+    _phoneIconImage = await _tryLoadImage('assets/invoice_phone_icon.png');
+    _assetsLoaded = true;
+  }
+
   static Future<File> generateInvoicePdf({
     required Invoice invoice,
     required List<InvoiceItem> items,
@@ -50,6 +85,7 @@ class PdfService {
     required AppSettings settings,
   }) async {
     await _loadFonts();
+    await _loadImages();
     final doc = pw.Document();
     final theme = _regularFont != null
         ? pw.ThemeData.withFont(base: _regularFont!, bold: _boldFont ?? _regularFont!)
@@ -103,8 +139,8 @@ class PdfService {
     return file;
   }
 
-  /// سربرگ: نوار نارنجی بالا، سمت راست لوگو (جای رزرو‌شده) + نام مجموعه،
-  /// سمت چپ اطلاعات فاکتور (تاریخ/شماره/نوع).
+  /// سربرگ: نوار نارنجی بالا، سمت راست لوگوی تصویری + نام/تماس/آدرس پویا،
+  /// سمت چپ آیکون‌های تصویری تاریخ/شماره/نوع فاکتور کنار متن پویا.
   static pw.Widget _header(AppSettings settings, Invoice invoice) {
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
       pw.Container(height: _layout.topBarHeight, color: _orange),
@@ -115,39 +151,52 @@ class PdfService {
           crossAxisAlignment: pw.CrossAxisAlignment.center,
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            // سمت راست: جای لوگو (رزرو‌شده) + نام مجموعه
-            pw.Row(children: [
-              pw.Container(
-                width: _layout.logoPlaceholderSize,
-                height: _layout.logoPlaceholderSize,
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: _orange, width: 1),
-                  borderRadius: pw.BorderRadius.circular(4),
-                ),
-                alignment: pw.Alignment.center,
-                child: pw.Text('لوگو',
-                    style: pw.TextStyle(fontSize: 6, color: PdfColors.grey500)),
-              ),
-              pw.SizedBox(width: 8),
-              pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                pw.Text(settings.shopName,
-                    style: pw.TextStyle(
-                        fontSize: _layout.headerCompanyNameFontSize,
-                        fontWeight: pw.FontWeight.bold,
-                        color: _darkGray)),
-                if (settings.contactNumber.isNotEmpty)
+            // سمت راست: لوگو + نام مجموعه + تماس/آدرس (اطلاعات واقعی از تنظیمات)
+            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              _logoImage != null
+                  ? pw.Image(_logoImage!, height: _layout.logoImageHeight)
+                  : pw.Text(settings.shopName,
+                      style: pw.TextStyle(
+                          fontSize: _layout.headerCompanyNameFontSize,
+                          fontWeight: pw.FontWeight.bold,
+                          color: _darkGray)),
+              pw.SizedBox(height: 2),
+              if (settings.contactNumber.isNotEmpty)
+                pw.Row(children: [
+                  if (_phoneIconImage != null) ...[
+                    pw.Image(_phoneIconImage!, width: _layout.contactIconSize, height: _layout.contactIconSize),
+                    pw.SizedBox(width: 3),
+                  ],
                   pw.Text(PersianDateUtil.toPersianDigits(settings.contactNumber),
                       style: pw.TextStyle(fontSize: _layout.headerContactFontSize, color: _orange)),
-                if (settings.address.isNotEmpty)
-                  pw.Text(settings.address,
-                      style: pw.TextStyle(fontSize: _layout.headerSubTitleFontSize, color: PdfColors.grey700)),
-              ]),
+                ]),
+              if (settings.address.isNotEmpty)
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(top: 1),
+                  child: pw.Row(children: [
+                    if (_locationIconImage != null) ...[
+                      pw.Image(_locationIconImage!,
+                          width: _layout.contactIconSize, height: _layout.contactIconSize),
+                      pw.SizedBox(width: 3),
+                    ],
+                    pw.Expanded(
+                      child: pw.Text(settings.address,
+                          style: pw.TextStyle(fontSize: _layout.headerSubTitleFontSize, color: PdfColors.grey700)),
+                    ),
+                  ]),
+                ),
             ]),
-            // سمت چپ: اطلاعات فاکتور
-            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-              _headerInfoLine('تاریخ', PersianDateUtil.formatDateNumeric(invoice.issueDate)),
-              _headerInfoLine('شماره فاکتور', PersianDateUtil.toPersianDigits(invoice.invoiceNumber)),
-              _headerInfoLine('نوع فاکتور', invoice.type.label),
+            // سمت چپ: آیکون‌های تصویری + اطلاعات فاکتور (تاریخ/شماره/نوع - داده واقعی)
+            pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
+              pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+                _headerInfoLine('تاریخ', PersianDateUtil.formatDateNumeric(invoice.issueDate)),
+                _headerInfoLine('شماره فاکتور', PersianDateUtil.toPersianDigits(invoice.invoiceNumber)),
+                _headerInfoLine('نوع فاکتور', invoice.type.label),
+              ]),
+              if (_iconsRowImage != null) ...[
+                pw.SizedBox(width: 6),
+                pw.Image(_iconsRowImage!, height: _layout.iconsRowImageHeight),
+              ],
             ]),
           ],
         ),
@@ -161,13 +210,25 @@ class PdfService {
         child: pw.Text('$label: $value', style: const pw.TextStyle(fontSize: 7.5)),
       );
 
- static pw.Widget _bottomBar() => pw.SizedBox(
-        height: 10,
-        child: pw.Stack(children: [
-          pw.Container(width: double.infinity, height: 10, color: _darkGray),
-          pw.Positioned(bottom: 0, left: 0, child: pw.Container(width: 70, height: 10, color: _orange)),
-        ]),
-      );
+  /// نوار پایین صفحه: تصویر تزئینی واقعی در صورت وجود، وگرنه بدیل رنگی ساده.
+  static pw.Widget _bottomBar() {
+    if (_bottomAccentImage != null) {
+      return pw.SizedBox(
+          width: double.infinity,
+          height: _layout.bottomAccentHeight,
+          child: pw.Image(_bottomAccentImage!, fit: pw.BoxFit.fill));
+    }
+    return pw.SizedBox(
+      height: _layout.bottomAccentHeight,
+      child: pw.Stack(children: [
+        pw.Container(width: double.infinity, height: _layout.bottomAccentHeight, color: _darkGray),
+        pw.Positioned(
+            bottom: 0,
+            left: 0,
+            child: pw.Container(width: 70, height: _layout.bottomAccentHeight, color: _orange)),
+      ]),
+    );
+  }
 
   static pw.Widget _customerInfo(Customer c) {
     return pw.Container(
@@ -186,7 +247,9 @@ class PdfService {
   }
 
   /// جدول اقلام: فقط ۴ ستون (ردیف / شرح / قیمت واحد / قیمت کل)، بدون ستون تخفیف.
-  /// هدر جدول با پس‌زمینه‌ی خاکستری تیره هماهنگ با هویت بصری.
+  /// نکته‌ی فنی: ویجت Table جهت RTL سند را برای ترتیب فیزیکی ستون‌ها در نظر
+  /// نمی‌گیرد، پس ترتیب لیست دستی برعکس شده: ایندکس ۰ = چپ‌ترین (قیمت کل)،
+  /// ایندکس ۳ = راست‌ترین (ردیف).
   static pw.Widget _itemsTable(List<InvoiceItem> items) {
     final rowCount = items.length > _layout.tableMinRows.toInt() ? items.length : _layout.tableMinRows.toInt();
 
@@ -217,10 +280,6 @@ class PdfService {
           children: values.map(cell).toList(),
         );
 
-    // نکته‌ی فنی مهم: ویجت Table جهت RTL سند را برای ترتیب فیزیکی ستون‌ها
-    // در نظر نمی‌گیرد (فقط جهت متن داخل هر سلول را درست می‌کند). برای اینکه
-    // «ردیف» فیزیکی سمت راست کاغذ و «قیمت کل» سمت چپ باشد، ترتیب لیست را
-    // دستی برعکس می‌کنیم: ایندکس ۰ = چپ‌ترین ستون (قیمت کل)، ایندکس ۳ = راست‌ترین (ردیف).
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
       columnWidths: {
@@ -266,7 +325,6 @@ class PdfService {
     ];
   }
 
-  /// جمع کل فاکتور، مستقل و خارج از جدول اقلام، با نوار نارنجی کنار آن.
   static pw.Widget _totals(Invoice invoice, AppSettings settings) {
     return pw.Row(children: [
       pw.Container(width: 4, height: 26, color: _orange),
@@ -291,9 +349,6 @@ class PdfService {
     ]);
   }
 
-  /// نکات مهم به‌صورت دو‌ستونه‌ی واقعی با جداکننده‌ی عمودی، تا متن‌ها هرگز
-  /// روی هم نیفتند. ارتفاع بخش خودکار بر اساس تعداد خطوط واقعی محاسبه می‌شود
-  /// (چون پهنای هر ستون خودش تعیین می‌کند چند خط لازم است).
   static pw.Widget _termsSection(String termsText) {
     final lines = termsText.split('\n').where((l) => l.trim().isNotEmpty).toList();
     if (lines.isEmpty) return pw.SizedBox();
@@ -316,7 +371,8 @@ class PdfService {
     final columnWidgets = <pw.Widget>[];
     for (var i = 0; i < columns.length; i++) {
       if (i > 0) {
-        columnWidgets.add(pw.Container(width: 0.7, color: PdfColors.grey400, margin: const pw.EdgeInsets.symmetric(horizontal: 6)));
+        columnWidgets.add(pw.Container(
+            width: 0.7, color: PdfColors.grey400, margin: const pw.EdgeInsets.symmetric(horizontal: 6)));
       }
       columnWidgets.add(pw.Expanded(
         child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: columns[i].map(bullet).toList()),
@@ -333,10 +389,19 @@ class PdfService {
       ),
       child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
         pw.Row(children: [
-          pw.Container(width: 3, height: 9, color: _orange),
-          pw.SizedBox(width: 4),
+          if (_importantIconImage != null)
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(left: 4),
+              child: pw.Image(_importantIconImage!,
+                  width: _layout.importantIconSize, height: _layout.importantIconSize),
+            )
+          else ...[
+            pw.Container(width: 3, height: 9, color: _orange),
+            pw.SizedBox(width: 4),
+          ],
           pw.Text('نکات مهم:',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: _layout.termsTitleFontSize, color: _darkGray)),
+              style: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold, fontSize: _layout.termsTitleFontSize, color: _darkGray)),
         ]),
         pw.SizedBox(height: 4),
         pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: columnWidgets),
