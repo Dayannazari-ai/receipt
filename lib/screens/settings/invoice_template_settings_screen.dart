@@ -120,6 +120,9 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
     return v.toStringAsFixed(1);
   }
 
+  /// نمایش سه‌رقم اعشار برای عرض ستون‌ها (مثلاً ۰.۰۸۰ و ۰.۵۲۰).
+  String _fmtWidth(double v) => v.toStringAsFixed(3);
+
   Widget _sliderRow({
     required String label,
     required double value,
@@ -127,8 +130,10 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
     required double max,
     required ValueChanged<double> onChanged,
     int? divisions,
+    String Function(double)? format,
   }) {
     final safeValue = value.clamp(min, max).toDouble();
+    final display = format ?? _fmt;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(children: [
@@ -143,8 +148,8 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
           ),
         ),
         SizedBox(
-          width: 44,
-          child: Text(_fmt(value),
+          width: 48,
+          child: Text(display(value),
               textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         ),
       ]),
@@ -200,6 +205,176 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
         ),
       ];
 
+  // ---------- گروه سربرگ ----------
+  void _resetHeaderGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _update(_layout.copyWith(
+      headerPaddingTop: d.headerPaddingTop,
+      headerPaddingBottom: d.headerPaddingBottom,
+      headerLogoToContactSpacing: d.headerLogoToContactSpacing,
+      headerIconToTextSpacing: d.headerIconToTextSpacing,
+      headerCompanyNameFontSize: d.headerCompanyNameFontSize,
+      headerContactFontSize: d.headerContactFontSize,
+      headerSubTitleFontSize: d.headerSubTitleFontSize,
+    ));
+  }
+
+  List<Widget> _headerGroup() => [
+        _groupHeader('سربرگ', _resetHeaderGroup),
+        _sliderRow(
+          label: 'فاصله بالای سربرگ',
+          value: _layout.headerPaddingTop,
+          min: 0,
+          max: 30,
+          onChanged: (v) => _update(_layout.copyWith(headerPaddingTop: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله پایین سربرگ',
+          value: _layout.headerPaddingBottom,
+          min: 0,
+          max: 30,
+          onChanged: (v) => _update(_layout.copyWith(headerPaddingBottom: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله لوگو تا تماس',
+          value: _layout.headerLogoToContactSpacing,
+          min: 0,
+          max: 20,
+          onChanged: (v) => _update(_layout.copyWith(headerLogoToContactSpacing: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله آیکون از متن',
+          value: _layout.headerIconToTextSpacing,
+          min: 0,
+          max: 15,
+          onChanged: (v) => _update(_layout.copyWith(headerIconToTextSpacing: v)),
+        ),
+        _sliderRow(
+          label: 'اندازه عنوان',
+          value: _layout.headerCompanyNameFontSize,
+          min: 6,
+          max: 24,
+          onChanged: (v) => _update(_layout.copyWith(headerCompanyNameFontSize: v)),
+        ),
+        _sliderRow(
+          label: 'اندازه شماره تماس',
+          value: _layout.headerContactFontSize,
+          min: 4,
+          max: 16,
+          onChanged: (v) => _update(_layout.copyWith(headerContactFontSize: v)),
+        ),
+        _sliderRow(
+          label: 'اندازه آدرس',
+          value: _layout.headerSubTitleFontSize,
+          min: 4,
+          max: 16,
+          onChanged: (v) => _update(_layout.copyWith(headerSubTitleFontSize: v)),
+        ),
+      ];
+
+  // ---------- گروه جدول ----------
+  void _resetTableGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _update(_layout.copyWith(
+      tableRowVerticalPadding: d.tableRowVerticalPadding,
+      tableCellFontSize: d.tableCellFontSize,
+      tableHeaderFontSize: d.tableHeaderFontSize,
+      colWidthRow: d.colWidthRow,
+      colWidthDescription: d.colWidthDescription,
+      colWidthUnitPrice: d.colWidthUnitPrice,
+      colWidthTotalPrice: d.colWidthTotalPrice,
+      tableCellHorizontalPadding: d.tableCellHorizontalPadding,
+    ));
+  }
+
+  /// مجموع عرض ستون‌ها (فقط برای نمایش؛ در PDF فقط نسبت‌ها مهم‌اند).
+  double get _colWidthSum =>
+      _layout.colWidthRow + _layout.colWidthDescription + _layout.colWidthUnitPrice + _layout.colWidthTotalPrice;
+
+  String _percentOfSum(double v) {
+    final sum = _colWidthSum;
+    if (sum <= 0) return '۰٪';
+    return '${(v / sum * 100).toStringAsFixed(0)}٪';
+  }
+
+  Widget _columnWidthRow({
+    required String label,
+    required double value,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Column(children: [
+      _sliderRow(
+        label: label,
+        value: value,
+        min: 0.02,
+        max: 0.4,
+        onChanged: onChanged,
+        format: _fmtWidth,
+      ),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 12, right: 12),
+          child: Text('سهم از عرض جدول: ${_percentOfSum(value)}',
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ),
+      ),
+    ]);
+  }
+
+  List<Widget> _tableGroup() => [
+        _groupHeader('جدول', _resetTableGroup),
+        _sliderRow(
+          label: 'ارتفاع ردیف',
+          value: _layout.tableRowVerticalPadding,
+          min: 0,
+          max: 10,
+          onChanged: (v) => _update(_layout.copyWith(tableRowVerticalPadding: v)),
+        ),
+        _sliderRow(
+          label: 'اندازه فونت جدول',
+          value: _layout.tableCellFontSize,
+          min: 4,
+          max: 16,
+          onChanged: (v) => _update(_layout.copyWith(tableCellFontSize: v, tableHeaderFontSize: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله داخلی سلول',
+          value: _layout.tableCellHorizontalPadding,
+          min: 0,
+          max: 10,
+          onChanged: (v) => _update(_layout.copyWith(tableCellHorizontalPadding: v)),
+        ),
+        const SizedBox(height: 6),
+        const Text('عرض ستون‌ها (نسبت‌ها مهم‌اند، نه اعداد مطلق)',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        _columnWidthRow(
+          label: 'ستون ردیف',
+          value: _layout.colWidthRow,
+          onChanged: (v) => _update(_layout.copyWith(colWidthRow: v)),
+        ),
+        _columnWidthRow(
+          label: 'ستون شرح',
+          value: _layout.colWidthDescription,
+          onChanged: (v) => _update(_layout.copyWith(colWidthDescription: v)),
+        ),
+        _columnWidthRow(
+          label: 'ستون قیمت واحد',
+          value: _layout.colWidthUnitPrice,
+          onChanged: (v) => _update(_layout.copyWith(colWidthUnitPrice: v)),
+        ),
+        _columnWidthRow(
+          label: 'ستون قیمت کل',
+          value: _layout.colWidthTotalPrice,
+          onChanged: (v) => _update(_layout.copyWith(colWidthTotalPrice: v)),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('مجموع عرض ستون‌ها: ${_fmtWidth(_colWidthSum)}',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        ),
+      ];
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -241,6 +416,10 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             children: [
               ..._logoGroup(),
+              const Divider(),
+              ..._headerGroup(),
+              const Divider(),
+              ..._tableGroup(),
               const SizedBox(height: 24),
             ],
           ),
