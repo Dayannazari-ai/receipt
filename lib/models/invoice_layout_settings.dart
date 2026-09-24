@@ -91,6 +91,7 @@ class InvoiceLayoutSettings {
   final double termsColumnDividerWidth; // ضخامت خط جداکننده‌ی دو ستون
   final double termsColumnDividerMargin; // فاصله‌ی دو طرف خط جداکننده
   final double termsTitleToContentSpacing;
+  final double spacingAfterTerms;
   final double termsFallbackBarWidth; // نوار نارنجی کنار عنوان (وقتی آیکون نیست)
   final double termsFallbackBarHeight;
   final double termsFallbackBarSpacing;
@@ -187,6 +188,7 @@ class InvoiceLayoutSettings {
     this.termsFallbackBarWidth = 3,
     this.termsFallbackBarHeight = 9,
     this.termsFallbackBarSpacing = 4,
+    this.spacingAfterTerms = 6,
     this.termsIconLeftPadding = 4,
     // امضا و مهر
     this.signatureLineWidth = 90,
