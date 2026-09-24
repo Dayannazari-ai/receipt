@@ -32,6 +32,9 @@ dependencies:
   # Formatting numbers with thousands separators
   intl: any
 
+  # ذخیره‌ی تنظیمات قالب فاکتور (جدا از دیتابیس)
+  shared_preferences: ^2.2.2
+
   # Excel import (pure-Dart, no native Android code - safe from SDK version conflicts)
   excel: ^4.0.6
   file_picker: ^9.0.2
