@@ -516,4 +516,269 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
     ));
   }
 
-  List
+  List<Widget> _signatureGroup() => [
+        _groupHeader('امضا و مهر', _resetSignatureGroup),
+        _sliderRow(
+          label: 'اندازه مهر',
+          value: _layout.stampImageSize,
+          min: 20,
+          max: 100,
+          onChanged: (v) => _update(_layout.copyWith(stampImageSize: v)),
+        ),
+        _sliderRow(
+          label: 'موقعیت افقی',
+          value: _layout.signatureOffsetX,
+          min: -60,
+          max: 60,
+          onChanged: (v) => _update(_layout.copyWith(signatureOffsetX: v)),
+        ),
+        _sliderRow(
+          label: 'موقعیت عمودی',
+          value: _layout.signatureOffsetY,
+          min: -60,
+          max: 60,
+          onChanged: (v) => _update(_layout.copyWith(signatureOffsetY: v)),
+        ),
+      ];
+
+  // ---------- گروه حاشیه صفحه ----------
+  void _resetMarginGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _update(_layout.copyWith(
+      pageMarginTop: d.pageMarginTop,
+      pageMarginBottom: d.pageMarginBottom,
+      pageMarginLeft: d.pageMarginLeft,
+      pageMarginRight: d.pageMarginRight,
+    ));
+  }
+
+  List<Widget> _marginGroup() => [
+        _groupHeader('حاشیه صفحه', _resetMarginGroup),
+        _sliderRow(
+          label: 'حاشیه بالا',
+          value: _layout.pageMarginTop,
+          min: 0,
+          max: 40,
+          onChanged: (v) => _update(_layout.copyWith(pageMarginTop: v)),
+        ),
+        _sliderRow(
+          label: 'حاشیه پایین',
+          value: _layout.pageMarginBottom,
+          min: 0,
+          max: 40,
+          onChanged: (v) => _update(_layout.copyWith(pageMarginBottom: v)),
+        ),
+        _sliderRow(
+          label: 'حاشیه چپ',
+          value: _layout.pageMarginLeft,
+          min: 0,
+          max: 40,
+          onChanged: (v) => _update(_layout.copyWith(pageMarginLeft: v)),
+        ),
+        _sliderRow(
+          label: 'حاشیه راست',
+          value: _layout.pageMarginRight,
+          min: 0,
+          max: 40,
+          onChanged: (v) => _update(_layout.copyWith(pageMarginRight: v)),
+        ),
+      ];
+
+  // ---------- گروه رنگ‌ها ----------
+  static const List<int> _colorPalette = [
+    0xFFE87722, // نارنجی پیش‌فرض
+    0xFFD64545,
+    0xFF2E8B57,
+    0xFF1E5F74,
+    0xFF6B4EFF,
+    0xFF00838F,
+    0xFF2B2B2B, // خاکستری تیره پیش‌فرض
+    0xFF616161,
+    0xFF9E9E9E,
+    0xFFBDBDBD, // خاکستری روشن (حاشیه پیش‌فرض)
+    0xFF000000, // مشکی (متن پیش‌فرض)
+    0xFFFFFFFF,
+  ];
+
+  void _resetColorsGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _updateImmediate(_layout.copyWith(
+      colorOrange: d.colorOrange,
+      colorDarkGray: d.colorDarkGray,
+      colorText: d.colorText,
+      colorBorder: d.colorBorder,
+    ));
+  }
+
+  Widget _colorPickerRow({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text(label, style: const TextStyle(fontSize: 13)),
+          const SizedBox(width: 8),
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: Color(value),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade400),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _colorPalette.map((hex) {
+            final selected = hex == value;
+            return GestureDetector(
+              onTap: () => onChanged(hex),
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: Color(hex),
+                  shape: BoxShape.circle,
+                  border: selected ? Border.all(color: Colors.black, width: 2.5) : null,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ]),
+    );
+  }
+
+  List<Widget> _colorsGroup() => [
+        _groupHeader('رنگ‌ها', _resetColorsGroup),
+        _colorPickerRow(
+          label: 'رنگ نارنجی اصلی',
+          value: _layout.colorOrange,
+          onChanged: (v) => _updateImmediate(_layout.copyWith(colorOrange: v)),
+        ),
+        _colorPickerRow(
+          label: 'رنگ خاکستری تیره',
+          value: _layout.colorDarkGray,
+          onChanged: (v) => _updateImmediate(_layout.copyWith(colorDarkGray: v)),
+        ),
+        _colorPickerRow(
+          label: 'رنگ متن',
+          value: _layout.colorText,
+          onChanged: (v) => _updateImmediate(_layout.copyWith(colorText: v)),
+        ),
+        _colorPickerRow(
+          label: 'رنگ خطوط',
+          value: _layout.colorBorder,
+          onChanged: (v) => _updateImmediate(_layout.copyWith(colorBorder: v)),
+        ),
+      ];
+
+  // ---------- بازنشانی همه ----------
+  Future<void> _confirmResetAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('بازنشانی همه تنظیمات'),
+        content: const Text('تمام تنظیمات قالب فاکتور به مقادیر پیش‌فرض بازمی‌گردند. ادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('بازنشانی همه', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    _timer?.cancel();
+    await InvoiceLayoutStorage.resetAll();
+    if (!mounted) return;
+    setState(() {
+      _layout = InvoiceLayoutSettings.defaults;
+      _previewVersion++;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('تنظیمات قالب فاکتور')),
+      body: Column(children: [
+        // ---------- پیش‌نمایش زنده ----------
+        SizedBox(
+          height: screenHeight * 0.4,
+          child: PdfPreview(
+            key: ValueKey(_previewVersion),
+            build: (format) async {
+              final file = await PdfService.generateInvoicePdf(
+                invoice: _sampleInvoice,
+                items: _sampleItems,
+                sideCosts: _sampleSideCosts,
+                customer: _sampleCustomer,
+                settings: _appSettings,
+                layout: _layout,
+              );
+              return file.readAsBytes();
+            },
+            allowPrinting: false,
+            allowSharing: false,
+            canChangePageFormat: false,
+            canChangeOrientation: false,
+            canDebug: false,
+          ),
+        ),
+        const Divider(height: 1),
+        // ---------- تنظیمات ----------
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            children: [
+              ..._logoGroup(),
+              const Divider(),
+              ..._headerGroup(),
+              const Divider(),
+              ..._tableGroup(),
+              const Divider(),
+              ..._customerGroup(),
+              const Divider(),
+              ..._totalsGroup(),
+              const Divider(),
+              ..._termsGroup(),
+              const Divider(),
+              ..._signatureGroup(),
+              const Divider(),
+              ..._marginGroup(),
+              const Divider(),
+              ..._colorsGroup(),
+              const SizedBox(height: 20),
+              const Divider(thickness: 1.2),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.settings_backup_restore, color: Colors.red),
+                  label: const Text('بازنشانی همه تنظیمات', style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red)),
+                  onPressed: _confirmResetAll,
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+}
