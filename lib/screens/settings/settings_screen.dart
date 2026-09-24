@@ -10,6 +10,7 @@ import '../../services/seed_service.dart';
 import '../../services/auth_service.dart';
 import '../../main.dart';
 import 'price_list_import_screen.dart';
+import 'invoice_template_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -348,8 +349,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
           const SizedBox(height: 20),
 
-          ElevatedButton(onPressed: _save, child: const Text('ذخیره تنظیمات')),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.receipt_long_outlined),
+            label: const Text('تنظیمات قالب فاکتور'),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const InvoiceTemplateSettingsScreen())),
+          ),
+          const SizedBox(height: 20),
 
+          ElevatedButton(onPressed: _save, child: const Text('ذخیره تنظیمات')),
           const SizedBox(height: 28),
           const Divider(),
           const SizedBox(height: 12),
