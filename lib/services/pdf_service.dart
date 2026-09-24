@@ -179,7 +179,7 @@ class PdfService {
                           width: _layout.contactIconSize, height: _layout.contactIconSize),
                       pw.SizedBox(width: 3),
                     ],
-                    pw.Expanded(
+                    pw.Flexible(
                       child: pw.Text(settings.address,
                           style: pw.TextStyle(fontSize: _layout.headerSubTitleFontSize, color: PdfColors.grey700)),
                     ),
