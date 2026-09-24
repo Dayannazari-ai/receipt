@@ -114,6 +114,16 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
     });
   }
 
+  /// اعمال فوری بدون تأخیر (برای انتخاب رنگ که رویداد پیوسته نیست).
+  void _updateImmediate(InvoiceLayoutSettings next) {
+    _timer?.cancel();
+    setState(() {
+      _layout = next;
+      _previewVersion++;
+    });
+    InvoiceLayoutStorage.save(_layout);
+  }
+
   // ---------- ساخت رشته‌ی نمایش عدد ----------
   String _fmt(double v) {
     if (v == v.roundToDouble()) return v.toStringAsFixed(0);
@@ -375,56 +385,135 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
         ),
       ];
 
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    final screenHeight = MediaQuery.of(context).size.height;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('تنظیمات قالب فاکتور')),
-      body: Column(children: [
-        // ---------- پیش‌نمایش زنده ----------
-        SizedBox(
-          height: screenHeight * 0.45,
-          child: PdfPreview(
-            key: ValueKey(_previewVersion),
-            build: (format) async {
-              final file = await PdfService.generateInvoicePdf(
-                invoice: _sampleInvoice,
-                items: _sampleItems,
-                sideCosts: _sampleSideCosts,
-                customer: _sampleCustomer,
-                settings: _appSettings,
-                layout: _layout,
-              );
-              return file.readAsBytes();
-            },
-            allowPrinting: false,
-            allowSharing: false,
-            canChangePageFormat: false,
-            canChangeOrientation: false,
-            canDebug: false,
-          ),
-        ),
-        const Divider(height: 1),
-        // ---------- تنظیمات ----------
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            children: [
-              ..._logoGroup(),
-              const Divider(),
-              ..._headerGroup(),
-              const Divider(),
-              ..._tableGroup(),
-              const SizedBox(height: 24),
-            ],
-          ),
-        ),
-      ]),
-    );
+  // ---------- گروه مشتری ----------
+  void _resetCustomerGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _update(_layout.copyWith(
+      customerBoxFontSize: d.customerBoxFontSize,
+      spacingAfterCustomerBox: d.spacingAfterCustomerBox,
+      customerBoxHeight: d.customerBoxHeight,
+    ));
   }
-}
+
+  List<Widget> _customerGroup() => [
+        _groupHeader('مشتری', _resetCustomerGroup),
+        _sliderRow(
+          label: 'اندازه فونت',
+          value: _layout.customerBoxFontSize,
+          min: 4,
+          max: 16,
+          onChanged: (v) => _update(_layout.copyWith(customerBoxFontSize: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله تا جدول',
+          value: _layout.spacingAfterCustomerBox,
+          min: 0,
+          max: 24,
+          onChanged: (v) => _update(_layout.copyWith(spacingAfterCustomerBox: v)),
+        ),
+        _sliderRow(
+          label: 'ارتفاع بخش (۰=خودکار)',
+          value: _layout.customerBoxHeight,
+          min: 0,
+          max: 60,
+          onChanged: (v) => _update(_layout.copyWith(customerBoxHeight: v)),
+        ),
+      ];
+
+  // ---------- گروه جمع کل ----------
+  void _resetTotalsGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _update(_layout.copyWith(
+      totalsBoldFontSize: d.totalsBoldFontSize,
+      totalsBoxVerticalPadding: d.totalsBoxVerticalPadding,
+      totalsBoxHorizontalPadding: d.totalsBoxHorizontalPadding,
+      spacingAfterTotals: d.spacingAfterTotals,
+    ));
+  }
+
+  List<Widget> _totalsGroup() => [
+        _groupHeader('جمع کل', _resetTotalsGroup),
+        _sliderRow(
+          label: 'اندازه فونت',
+          value: _layout.totalsBoldFontSize,
+          min: 6,
+          max: 20,
+          onChanged: (v) => _update(_layout.copyWith(totalsBoldFontSize: v)),
+        ),
+        _sliderRow(
+          label: 'ارتفاع کادر (عمودی)',
+          value: _layout.totalsBoxVerticalPadding,
+          min: 0,
+          max: 16,
+          onChanged: (v) => _update(_layout.copyWith(totalsBoxVerticalPadding: v)),
+        ),
+        _sliderRow(
+          label: 'عرض کادر (افقی)',
+          value: _layout.totalsBoxHorizontalPadding,
+          min: 0,
+          max: 20,
+          onChanged: (v) => _update(_layout.copyWith(totalsBoxHorizontalPadding: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله بعد از جمع کل',
+          value: _layout.spacingAfterTotals,
+          min: 0,
+          max: 24,
+          onChanged: (v) => _update(_layout.copyWith(spacingAfterTotals: v)),
+        ),
+      ];
+
+  // ---------- گروه نکات مهم ----------
+  void _resetTermsGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _update(_layout.copyWith(
+      termsFontSize: d.termsFontSize,
+      termsColumnDividerMargin: d.termsColumnDividerMargin,
+      termsLineSpacing: d.termsLineSpacing,
+      termsBoxPadding: d.termsBoxPadding,
+    ));
+  }
+
+  List<Widget> _termsGroup() => [
+        _groupHeader('نکات مهم', _resetTermsGroup),
+        _sliderRow(
+          label: 'اندازه فونت',
+          value: _layout.termsFontSize,
+          min: 4,
+          max: 14,
+          onChanged: (v) => _update(_layout.copyWith(termsFontSize: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله بین دو ستون',
+          value: _layout.termsColumnDividerMargin,
+          min: 0,
+          max: 20,
+          onChanged: (v) => _update(_layout.copyWith(termsColumnDividerMargin: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله بین خطوط',
+          value: _layout.termsLineSpacing,
+          min: 0,
+          max: 10,
+          onChanged: (v) => _update(_layout.copyWith(termsLineSpacing: v)),
+        ),
+        _sliderRow(
+          label: 'ارتفاع بخش (پدینگ)',
+          value: _layout.termsBoxPadding,
+          min: 0,
+          max: 16,
+          onChanged: (v) => _update(_layout.copyWith(termsBoxPadding: v)),
+        ),
+      ];
+
+  // ---------- گروه امضا و مهر ----------
+  void _resetSignatureGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _update(_layout.copyWith(
+      stampImageSize: d.stampImageSize,
+      signatureOffsetX: d.signatureOffsetX,
+      signatureOffsetY: d.signatureOffsetY,
+    ));
+  }
+
+  List
