@@ -17,6 +17,8 @@ import '../../repositories/settings_repository.dart';
 import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
+import '../../utils/thousands_input_formatter.dart';
+import 'package:flutter/services.dart';
 import '../invoices/invoice_detail_screen.dart';
 import '../products/barcode_scanner_screen.dart';
 import '../voice_search_sheet.dart';
@@ -232,7 +234,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: qtyCtrl, decoration: const InputDecoration(labelText: 'تعداد'), keyboardType: TextInputType.number),
           const SizedBox(height: 12),
-          TextField(controller: priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد'), keyboardType: TextInputType.number),
+          TextField(controller: priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
@@ -242,7 +244,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     );
     if (saved == true) {
       final newQty = int.tryParse(qtyCtrl.text) ?? line.quantity;
-      final newPrice = double.tryParse(priceCtrl.text.replaceAll(',', '')) ?? line.unitPrice;
+      final newPrice = double.tryParse(ThousandsInputFormatter.unformat(priceCtrl.text)) ?? line.unitPrice;
       setState(() {
         _lines[index].quantity = newQty;
         _lines[index].unitPrice = newPrice;
@@ -263,11 +265,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           const SizedBox(height: 12),
           TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'عنوان هزینه')),
           const SizedBox(height: 12),
-          TextField(controller: amountCtrl, decoration: const InputDecoration(labelText: 'مبلغ'), keyboardType: TextInputType.number),
+          TextField(controller: amountCtrl, decoration: const InputDecoration(labelText: 'مبلغ'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: () {
-              final amount = double.tryParse(amountCtrl.text.replaceAll(',', '')) ?? 0;
+              final amount = double.tryParse(ThousandsInputFormatter.unformat(amountCtrl.text)) ?? 0;
               if (titleCtrl.text.trim().isEmpty || amount <= 0) return;
               Navigator.pop(ctx, SideCostLine(title: titleCtrl.text.trim(), amount: amount));
             },
@@ -661,6 +663,8 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
   ServiceItem? _selected;
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
+  child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
+  final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text)) ?? _selected!.price;
 
   @override
   void initState() {
@@ -850,6 +854,8 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
   Product? _selected;
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
+  child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
+  final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text)) ?? _selected!.sellPrice;
 
   @override
   void initState() {
