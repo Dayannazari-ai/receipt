@@ -6,6 +6,7 @@ import '../../repositories/vehicle_reference_repository.dart';
 import '../voice_search_sheet.dart';
 import '../../services/voice_search_service.dart';
 import '../../utils/currency_formatter.dart';
+import '../../utils/thousands_input_formatter.dart';
 import '../../repositories/settings_repository.dart';
 import '../../models/app_settings.dart';
 
@@ -393,7 +394,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty || _codeCtrl.text.trim().isEmpty) return;
-    final price = double.tryParse(_priceCtrl.text.replaceAll(',', ''));
+    final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text));
     if (price == null || price < 0) return;
 
     final codeExists = await _serviceRepo.codeExists(_codeCtrl.text.trim(), excludeId: widget.service?.id);
@@ -475,7 +476,8 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
           TextField(
               controller: _priceCtrl,
               decoration: const InputDecoration(labelText: 'قیمت'),
-              keyboardType: TextInputType.number),
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsInputFormatter()]),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
