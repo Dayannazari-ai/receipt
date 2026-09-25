@@ -5,6 +5,7 @@ import '../../utils/validators.dart';
 import 'barcode_scanner_screen.dart';
 import '../voice_search_sheet.dart';
 import '../../services/voice_search_service.dart';
+import '../../utils/thousands_input_formatter.dart';
 
 class ProductFormScreen extends StatefulWidget {
   final Product? product;
@@ -210,6 +211,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   controller: _purchaseCtrl,
                   decoration: const InputDecoration(labelText: 'قیمت خرید'),
                   keyboardType: TextInputType.number,
+                  inputFormatters: [ThousandsInputFormatter()],
                   validator: (v) => Validators.nonNegativeNumber(v, fieldName: 'قیمت خرید')),
             ),
             const SizedBox(width: 12),
@@ -218,6 +220,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   controller: _sellCtrl,
                   decoration: const InputDecoration(labelText: 'قیمت فروش'),
                   keyboardType: TextInputType.number,
+                  inputFormatters: [ThousandsInputFormatter()],
                   validator: (v) => Validators.nonNegativeNumber(v, fieldName: 'قیمت فروش')),
             ),
           ]),
@@ -251,6 +254,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             child: _saving
                 ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : Text(_isEdit ? 'ذخیره تغییرات' : 'ثبت کالا'),
+            
+            purchasePrice: double.parse(ThousandsInputFormatter.unformat(_purchaseCtrl.text)),
+        sellPrice: double.parse(ThousandsInputFormatter.unformat(_sellCtrl.text)),
           ),
         ]),
       ),
