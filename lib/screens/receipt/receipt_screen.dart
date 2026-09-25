@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 import '../../models/invoice.dart';
@@ -18,7 +19,6 @@ import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../../utils/thousands_input_formatter.dart';
-import 'package:flutter/services.dart';
 import '../invoices/invoice_detail_screen.dart';
 import '../products/barcode_scanner_screen.dart';
 import '../voice_search_sheet.dart';
@@ -663,8 +663,6 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
   ServiceItem? _selected;
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
-  child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
-  final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text)) ?? _selected!.price;
 
   @override
   void initState() {
@@ -816,14 +814,14 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
                   const SizedBox(width: 8),
                   Expanded(
                     flex: 2,
-                    child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number),
+                    child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
                   ),
                 ]),
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: () {
                     final qty = int.tryParse(_qtyCtrl.text) ?? 1;
-                    final price = double.tryParse(_priceCtrl.text.replaceAll(',', '')) ?? _selected!.price;
+                    final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text)) ?? _selected!.price;
                     Navigator.pop(
                         context,
                         InvoiceCartLine(
@@ -854,8 +852,6 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
   Product? _selected;
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
-  child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
-  final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text)) ?? _selected!.sellPrice;
 
   @override
   void initState() {
@@ -920,14 +916,14 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
                   const SizedBox(width: 8),
                   Expanded(
                     flex: 2,
-                    child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number),
+                    child: TextField(controller: _priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد (قابل ویرایش)'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
                   ),
                 ]),
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: () {
                     final qty = int.tryParse(_qtyCtrl.text) ?? 1;
-                    final price = double.tryParse(_priceCtrl.text.replaceAll(',', '')) ?? _selected!.sellPrice;
+                    final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text)) ?? _selected!.sellPrice;
                     if (qty > _selected!.stock) {
                       ScaffoldMessenger.of(context)
                           .showSnackBar(SnackBar(content: Text('موجودی کافی نیست (موجودی: ${_selected!.stock})')));
