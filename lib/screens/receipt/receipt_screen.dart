@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 import '../../models/invoice.dart';
@@ -281,22 +280,62 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (result != null) setState(() => _sideCosts.add(result));
   }
 
-  Future<void> _issue() async {
+  /// اعتبارسنجی مشترک قبل از صدور فاکتور اصلی یا ذخیره‌ی پیش‌فاکتور.
+  bool _validateBeforeIssue() {
     if (_lines.isEmpty) {
       _showMsg('حداقل یک قلم اضافه کنید');
-      return;
+      return false;
     }
     if ((_paymentType == PaymentType.cardToCard || _paymentType == PaymentType.bankTransfer) &&
         _selectedAccount == null &&
         _accounts.isNotEmpty) {
       _showMsg('لطفاً حساب مقصد را انتخاب کنید');
-      return;
+      return false;
     }
     if (_paymentType == PaymentType.nonCash && _checkDueDate == null) {
       _showMsg('لطفاً تاریخ سررسید چک را مشخص کنید');
-      return;
+      return false;
     }
+    return true;
+  }
 
+  /// Dialog انتخاب نوع ذخیره: صدور فاکتور اصلی، ذخیره به‌عنوان پیش‌فاکتور، یا انصراف.
+  Future<void> _showIssueDialog() async {
+    if (!_validateBeforeIssue()) return;
+    if (!mounted) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('نوع ذخیره فاکتور را انتخاب کنید'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            icon: const Icon(Icons.check_circle_outline),
+            label: const Text('صدور فاکتور اصلی'),
+            onPressed: () => Navigator.pop(ctx, 'final'),
+          ),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+            icon: const Icon(Icons.edit_note_outlined),
+            label: const Text('ذخیره به‌عنوان پیش‌فاکتور'),
+            onPressed: () => Navigator.pop(ctx, 'draft'),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('انصراف')),
+        ],
+      ),
+    );
+    if (choice == 'final') {
+      await _issueAsFinal();
+    } else if (choice == 'draft') {
+      await _issueAsDraft();
+    }
+  }
+
+  /// صدور فاکتور اصلی. منطق دقیقاً مثل قبل است.
+  Future<void> _issueAsFinal() async {
     setState(() => _issuing = true);
     try {
       int? customerId = _selectedCustomerId;
@@ -347,6 +386,59 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     }
   }
 
+  /// ذخیره به‌عنوان پیش‌فاکتور. شماره از سری جداگانه گرفته می‌شود و هیچ اثری
+  /// روی موجودی کالا ندارد. پیش‌فاکتور را می‌توان بعداً از تب «پیش‌فاکتورها»
+  /// باز و ویرایش، یا به فاکتور اصلی تبدیل کرد.
+  Future<void> _issueAsDraft() async {
+    setState(() => _issuing = true);
+    try {
+      int? customerId = _selectedCustomerId;
+      if (customerId == null && _nameCtrl.text.trim().isNotEmpty) {
+        if (_mobileCtrl.text.trim().isNotEmpty) {
+          final existing = await _customerRepo.search(_mobileCtrl.text.trim());
+          final match = existing.where((c) => c.mobile == _mobileCtrl.text.trim());
+          if (match.isNotEmpty) {
+            customerId = match.first.id;
+          }
+        }
+        customerId ??= await _customerRepo.insert(
+            Customer(name: _nameCtrl.text.trim(), mobile: _mobileCtrl.text.trim()));
+      }
+
+      await _invoiceService.saveDraftInvoice(
+        type: _type,
+        customerId: customerId,
+        lines: _lines,
+        sideCosts: _sideCosts,
+        paymentType: _paymentType,
+        paymentAccountInfo:
+            _selectedAccount != null ? '${_selectedAccount!.title}: ${_selectedAccount!.number}' : null,
+        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        issueDateTime: _issueDateTime,
+        checkDueDate: _checkDueDate?.toIso8601String(),
+      );
+
+      if (mounted) {
+        setState(() {
+          _lines.clear();
+          _sideCosts.clear();
+          _nameCtrl.clear();
+          _mobileCtrl.clear();
+          _notesCtrl.clear();
+          _selectedCustomerId = null;
+          _issueDateTime = DateTime.now();
+          _checkDueDate = null;
+        });
+        _showMsg('پیش‌فاکتور ذخیره شد. از بخش «پیش‌فاکتورها» قابل مشاهده و ویرایش است.');
+        _init();
+      }
+    } catch (e) {
+      _showMsg('خطا در ذخیره‌ی پیش‌فاکتور: $e');
+    } finally {
+      if (mounted) setState(() => _issuing = false);
+    }
+  }
+
   void _clearDraft() {
     setState(() {
       _lines.clear();
@@ -375,7 +467,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             padding: const EdgeInsets.only(left: 8),
             child: TextButton(
               style: TextButton.styleFrom(backgroundColor: primary, foregroundColor: Colors.white, shape: const StadiumBorder()),
-              onPressed: _issuing ? null : _issue,
+              onPressed: _issuing ? null : _showIssueDialog,
               child: const Text('انتشار'),
             ),
           ),
@@ -564,7 +656,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         TextField(controller: _notesCtrl, decoration: const InputDecoration(labelText: 'توضیحات'), maxLines: 2),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: _issuing ? null : _issue,
+          onPressed: _issuing ? null : _showIssueDialog,
           child: _issuing
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Text('انتشار'),
