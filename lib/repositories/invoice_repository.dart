@@ -56,6 +56,19 @@ class InvoiceRepository {
     return '$_draftPrefix/${maxNum + 1}';
   }
 
+  /// خواندن invoice_start_number مستقیماً از داخل یک تراکنش باز، بدون باز
+  /// کردن اتصال جدید به دیتابیس. استفاده‌ی از SettingsRepository.getSettings()
+  /// در این نقطه ممنوع است چون آن متد از db (نه از txn) کوئری می‌زند و در
+  /// نتیجه، وقتی از داخل یک تراکنش صدا زده شود، باعث بن‌بست (deadlock) دائمی
+  /// می‌شود.
+  Future<int> _readInvoiceStartNumber(Transaction txn) async {
+    final rows =
+        await txn.query('settings', where: 'key = ?', whereArgs: ['invoice_start_number']);
+    if (rows.isEmpty) return 1001; // همان مقدار پیش‌فرض AppSettings
+    final value = rows.first['value'] as String?;
+    return int.tryParse(value ?? '') ?? 1001;
+  }
+
   /// اعمال اثر یک آیتم کالا روی موجودی (کاهش برای فروش/خدمات، افزایش برای
   /// خرید کالا) و ثبت آن در stock_movements. این دقیقاً همان منطقی است که
   /// قبلاً فقط داخل createInvoice بود؛ اکنون قابل استفاده‌ی مجدد در
@@ -137,6 +150,11 @@ class InvoiceRepository {
   /// اجرا می‌شود. تمام این مراحل در یک تراکنش هستند: یا همه انجام می‌شوند
   /// یا هیچ‌کدام.
   ///
+  /// نکته‌ی فنی مهم: تمام خواندن‌ها/نوشتن‌ها اینجا باید از طریق همان txn
+  /// انجام شوند، نه از طریق متدهایی مثل SettingsRepository.getSettings()
+  /// که مستقل یک اتصال دیتابیس جدید باز می‌کنند — چون این کار وسط یک
+  /// تراکنش باز، باعث بن‌بست (deadlock) دائمی می‌شود.
+  ///
   /// در صورت موفقیت، شماره‌ی نهایی فاکتور را برمی‌گرداند.
   /// در صورتی که رکورد پیش‌فاکتور نباشد یا قبلاً تبدیل شده باشد، استثنا
   /// پرتاب می‌شود.
@@ -152,12 +170,14 @@ class InvoiceRepository {
       }
 
       // شماره‌ی جدید از سری اصلی، با همان منطق getNextInvoiceNumber ولی
-      // داخل همین تراکنش (تا با فراخوانی همزمان تداخل نکند).
-      final settings = await _settingsRepo.getSettings();
+      // داخل همین تراکنش (تا با فراخوانی همزمان تداخل نکند) و بدون باز
+      // کردن اتصال جدید به دیتابیس (به همین دلیل _readInvoiceStartNumber
+      // به‌جای _settingsRepo.getSettings() استفاده می‌شود).
+      final startNumber = await _readInvoiceStartNumber(txn);
       final prefix = _prefixFor(invoice.type);
       final numberRows =
           await txn.query('invoices', where: 'invoice_number LIKE ?', whereArgs: ['$prefix/%']);
-      int maxNum = settings.invoiceStartNumber - 1;
+      int maxNum = startNumber - 1;
       for (final row in numberRows) {
         final numStr = (row['invoice_number'] as String).split('/').last;
         final n = int.tryParse(numStr);
