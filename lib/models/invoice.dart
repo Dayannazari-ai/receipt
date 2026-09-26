@@ -69,6 +69,7 @@ class Invoice {
   final String? checkDueDate; // تاریخ سررسید چک (فقط وقتی نوع پرداخت چک است)
   final String? notes;
   final int isDeleted;
+  final int isDraft; // ۱ = پیش‌فاکتور (هنوز فاکتور اصلی نشده)، ۰ = فاکتور اصلی
   final String createdAt;
 
   Invoice({
@@ -85,6 +86,7 @@ class Invoice {
     this.checkDueDate,
     this.notes,
     this.isDeleted = 0,
+    this.isDraft = 0,
     String? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
 
@@ -105,6 +107,7 @@ class Invoice {
         'check_due_date': checkDueDate,
         'notes': notes,
         'is_deleted': isDeleted,
+        'is_draft': isDraft,
         'created_at': createdAt,
       };
 
@@ -122,6 +125,7 @@ class Invoice {
         checkDueDate: map['check_due_date'] as String?,
         notes: map['notes'] as String?,
         isDeleted: map['is_deleted'] as int? ?? 0,
+        isDraft: map['is_draft'] as int? ?? 0,
         createdAt: map['created_at'] as String?,
       );
 }
