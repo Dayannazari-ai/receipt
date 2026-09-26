@@ -6,6 +6,7 @@ class InvoiceCartLine {
   final int? serviceId;
   final int? productId;
   final String description;
+  String? itemCode; // کد کالا/خدمت؛ قابل ویرایش دستی توسط کاربر
   int quantity;
   double unitPrice;
 
@@ -14,6 +15,7 @@ class InvoiceCartLine {
     this.serviceId,
     this.productId,
     required this.description,
+    this.itemCode,
     this.quantity = 1,
     required this.unitPrice,
   });
@@ -74,6 +76,7 @@ class InvoiceService {
               serviceId: l.serviceId,
               productId: l.productId,
               description: l.description,
+              itemCode: l.itemCode,
               quantity: l.quantity,
               unitPrice: l.unitPrice,
               total: l.total,
@@ -129,6 +132,7 @@ class InvoiceService {
               serviceId: l.serviceId,
               productId: l.productId,
               description: l.description,
+              itemCode: l.itemCode,
               quantity: l.quantity,
               unitPrice: l.unitPrice,
               total: l.total,
@@ -193,6 +197,7 @@ class InvoiceService {
               serviceId: l.serviceId,
               productId: l.productId,
               description: l.description,
+              itemCode: l.itemCode,
               quantity: l.quantity,
               unitPrice: l.unitPrice,
               total: l.total,
