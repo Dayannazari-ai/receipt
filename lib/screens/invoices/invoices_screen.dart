@@ -27,18 +27,21 @@ class _InvoicesScreenState extends State<InvoicesScreen> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
     _tab.addListener(() {
       if (!_tab.indexIsChanging) _load();
     });
     _load();
   }
 
+  bool get _isDraftsTab => _tab.index == 2;
+
   Future<void> _load() async {
     setState(() => _loading = true);
     final invoices = await _invoiceRepo.getAll(
       onlySales: _tab.index == 0,
       onlyPurchases: _tab.index == 1,
+      onlyDrafts: _isDraftsTab,
     );
     final customers = await _customerRepo.getAll();
     final settings = await _settingsRepo.getSettings();
@@ -64,12 +67,16 @@ class _InvoicesScreenState extends State<InvoicesScreen> with SingleTickerProvid
     return Scaffold(
       appBar: AppBar(
         title: const Text('تراکنش‌ها'),
-        bottom: TabBar(controller: _tab, tabs: const [Tab(text: 'فاکتور فروش'), Tab(text: 'فاکتور خرید')]),
+        bottom: TabBar(controller: _tab, tabs: const [
+          Tab(text: 'فاکتور فروش'),
+          Tab(text: 'فاکتور خرید'),
+          Tab(text: 'پیش‌فاکتورها'),
+        ]),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _invoices.isEmpty
-              ? const Center(child: Text('فاکتوری ثبت نشده است'))
+              ? Center(child: Text(_isDraftsTab ? 'پیش‌فاکتوری ثبت نشده است' : 'فاکتوری ثبت نشده است'))
               : ListView(
                   padding: const EdgeInsets.all(12),
                   children: days.expand((day) {
@@ -83,8 +90,12 @@ class _InvoicesScreenState extends State<InvoicesScreen> with SingleTickerProvid
                       ...list.map((inv) => Card(
                             child: ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: Colors.green.shade50,
-                                child: const Icon(Icons.receipt_long_outlined, color: Colors.green),
+                                backgroundColor:
+                                    _isDraftsTab ? Colors.orange.shade50 : Colors.green.shade50,
+                                child: Icon(
+                                  _isDraftsTab ? Icons.edit_note_outlined : Icons.receipt_long_outlined,
+                                  color: _isDraftsTab ? Colors.orange : Colors.green,
+                                ),
                               ),
                               title: Text('#${PersianDateUtil.toPersianDigits(inv.invoiceNumber)}  '
                                   '${inv.customerId != null ? _customerNames[inv.customerId] ?? '' : ''}'),
@@ -92,7 +103,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> with SingleTickerProvid
                               trailing:
                                   Text(CurrencyFormatter.format(inv.finalAmount, _currency), style: const TextStyle(fontWeight: FontWeight.bold)),
                               onTap: () => Navigator.of(context)
-                                  .push(MaterialPageRoute(builder: (_) => InvoiceDetailScreen(invoiceId: inv.id!))),
+                                  .push(MaterialPageRoute(builder: (_) => InvoiceDetailScreen(invoiceId: inv.id!)))
+                                  .then((_) => _load()),
                             ),
                           )),
                     ];
