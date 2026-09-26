@@ -12,9 +12,10 @@ class DatabaseHelper {
   // قابلیت جستجوی صوتی. این تغییر با Migration امن (ALTER TABLE) انجام
   // می‌شود و هیچ داده‌ی قبلی کاربران حذف یا بازنویسی نمی‌شود.
   // نسخه ۴: افزودن ستون is_draft به invoices برای قابلیت «پیش‌فاکتور».
-  // با Migration امن (ALTER TABLE) انجام می‌شود؛ رکوردهای قبلی is_draft=0
-  // می‌گیرند که دقیقاً معادل رفتار فعلی (فاکتور اصلی) است.
-  static const int dbVersion = 4;
+  // نسخه ۵: افزودن ستون item_code به invoice_items؛ کد کالا/خدمت در لحظه‌ی
+  // صدور یا ذخیره‌ی هر ردیف فریز می‌شود، درست مانند unit_price، و با تغییر
+  // بعدی Product.code یا ServiceItem.code تغییر نمی‌کند.
+  static const int dbVersion = 5;
 
   Database? _db;
 
@@ -36,8 +37,8 @@ class DatabaseHelper {
     );
   }
 
-  /// نصب تازه (کاربر جدید): جداول از همان ابتدا شامل voice_search_label و
-  /// is_draft هستند.
+  /// نصب تازه (کاربر جدید): جداول از همان ابتدا شامل voice_search_label،
+  /// is_draft و item_code هستند.
   Future<void> _onCreate(Database db, int version) async {
     final batch = db.batch();
 
@@ -175,6 +176,7 @@ class DatabaseHelper {
         service_id INTEGER,
         product_id INTEGER,
         description TEXT NOT NULL,
+        item_code TEXT,
         quantity INTEGER NOT NULL,
         unit_price REAL NOT NULL,
         total REAL NOT NULL,
@@ -245,6 +247,14 @@ class DatabaseHelper {
       } catch (_) {}
       try {
         await db.execute('CREATE INDEX idx_invoices_is_draft ON invoices(is_draft)');
+      } catch (_) {}
+    }
+    if (oldVersion < 5) {
+      // افزودن کد کالا/خدمت فریزشده به هر ردیف فاکتور. رکوردهای قدیمی
+      // item_code را NULL می‌گیرند و در PDF/UI با یک خط تیره نمایش
+      // داده می‌شوند؛ هیچ داده‌ای بازنویسی یا حذف نمی‌شود.
+      try {
+        await db.execute('ALTER TABLE invoice_items ADD COLUMN item_code TEXT');
       } catch (_) {}
     }
   }
