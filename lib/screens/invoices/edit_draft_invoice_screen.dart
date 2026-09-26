@@ -85,6 +85,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
               serviceId: it.serviceId,
               productId: it.productId,
               description: it.description,
+              itemCode: it.itemCode,
               quantity: it.quantity,
               unitPrice: it.unitPrice,
             ))
@@ -193,6 +194,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             itemType: InvoiceItemType.product,
             productId: product.id,
             description: product.name,
+            itemCode: product.code,
             quantity: 1,
             unitPrice: product.sellPrice,
           )));
@@ -221,6 +223,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
               itemType: InvoiceItemType.product,
               productId: newProduct.id,
               description: newProduct.name,
+              itemCode: newProduct.code,
               quantity: 1,
               unitPrice: newProduct.sellPrice,
             )));
@@ -242,6 +245,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             itemType: InvoiceItemType.service,
             serviceId: s.id,
             description: s.name,
+            itemCode: s.code,
             quantity: 1,
             unitPrice: s.price,
           )));
@@ -251,6 +255,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             itemType: InvoiceItemType.product,
             productId: p.id,
             description: p.name,
+            itemCode: p.code,
             quantity: 1,
             unitPrice: p.sellPrice,
           )));
@@ -261,6 +266,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     final line = _lines[index];
     final priceCtrl = TextEditingController(text: line.unitPrice.toStringAsFixed(0));
     final qtyCtrl = TextEditingController(text: line.quantity.toString());
+    final codeCtrl = TextEditingController(text: line.itemCode ?? '');
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -269,6 +275,8 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
           TextField(controller: qtyCtrl, decoration: const InputDecoration(labelText: 'تعداد'), keyboardType: TextInputType.number),
           const SizedBox(height: 12),
           TextField(controller: priceCtrl, decoration: const InputDecoration(labelText: 'قیمت واحد'), keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()]),
+          const SizedBox(height: 12),
+          TextField(controller: codeCtrl, decoration: const InputDecoration(labelText: 'کد کالا/خدمت')),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
@@ -279,9 +287,11 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     if (saved == true) {
       final newQty = int.tryParse(qtyCtrl.text) ?? line.quantity;
       final newPrice = double.tryParse(ThousandsInputFormatter.unformat(priceCtrl.text)) ?? line.unitPrice;
+      final newCode = codeCtrl.text.trim();
       setState(() {
         _lines[index].quantity = newQty;
         _lines[index].unitPrice = newPrice;
+        _lines[index].itemCode = newCode.isEmpty ? null : newCode;
       });
     }
   }
@@ -453,7 +463,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             child: ListTile(
               title: Text(line.description),
               subtitle: Text(
-                  '${PersianDateUtil.toPersianDigits('${line.quantity}')} × ${CurrencyFormatter.format(line.unitPrice, _settings.currency)} = ${CurrencyFormatter.format(line.total, _settings.currency)}'),
+                  '${(line.itemCode != null && line.itemCode!.isNotEmpty) ? 'کد: ${line.itemCode}  ' : ''}${PersianDateUtil.toPersianDigits('${line.quantity}')} × ${CurrencyFormatter.format(line.unitPrice, _settings.currency)} = ${CurrencyFormatter.format(line.total, _settings.currency)}'),
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(
                   icon: const Icon(Icons.edit_outlined, color: Colors.blue),
@@ -812,6 +822,7 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
                             itemType: InvoiceItemType.service,
                             serviceId: _selected!.id,
                             description: _selected!.name,
+                            itemCode: _selected!.code,
                             quantity: qty,
                             unitPrice: price));
                   },
@@ -822,8 +833,6 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
     );
   }
 }
-
-// ---------------- Product picker (کپی مستقل) ----------------
 
 class _DraftProductPickerSheet extends StatefulWidget {
   const _DraftProductPickerSheet();
@@ -921,6 +930,7 @@ class _DraftProductPickerSheetState extends State<_DraftProductPickerSheet> {
                             itemType: InvoiceItemType.product,
                             productId: _selected!.id,
                             description: _selected!.name,
+                            itemCode: _selected!.code,
                             quantity: qty,
                             unitPrice: price));
                   },
