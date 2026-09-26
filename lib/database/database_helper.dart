@@ -11,7 +11,10 @@ class DatabaseHelper {
   // نسخه ۲: افزودن ستون voice_search_label به products و services برای
   // قابلیت جستجوی صوتی. این تغییر با Migration امن (ALTER TABLE) انجام
   // می‌شود و هیچ داده‌ی قبلی کاربران حذف یا بازنویسی نمی‌شود.
-  static const int dbVersion = 3;
+  // نسخه ۴: افزودن ستون is_draft به invoices برای قابلیت «پیش‌فاکتور».
+  // با Migration امن (ALTER TABLE) انجام می‌شود؛ رکوردهای قبلی is_draft=0
+  // می‌گیرند که دقیقاً معادل رفتار فعلی (فاکتور اصلی) است.
+  static const int dbVersion = 4;
 
   Database? _db;
 
@@ -33,7 +36,8 @@ class DatabaseHelper {
     );
   }
 
-  /// نصب تازه (کاربر جدید): جداول از همان ابتدا شامل voice_search_label هستند.
+  /// نصب تازه (کاربر جدید): جداول از همان ابتدا شامل voice_search_label و
+  /// is_draft هستند.
   Future<void> _onCreate(Database db, int version) async {
     final batch = db.batch();
 
@@ -152,6 +156,7 @@ class DatabaseHelper {
         check_due_date TEXT,
         notes TEXT,
         is_deleted INTEGER NOT NULL DEFAULT 0,
+        is_draft INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
@@ -160,6 +165,7 @@ class DatabaseHelper {
     batch.execute('CREATE INDEX idx_invoices_customer ON invoices(customer_id)');
     batch.execute('CREATE INDEX idx_invoices_date ON invoices(issue_date)');
     batch.execute('CREATE INDEX idx_invoices_type ON invoices(type)');
+    batch.execute('CREATE INDEX idx_invoices_is_draft ON invoices(is_draft)');
 
     batch.execute('''
       CREATE TABLE invoice_items (
@@ -229,6 +235,16 @@ class DatabaseHelper {
     if (oldVersion < 3) {
       try {
         await db.execute('ALTER TABLE vehicle_brands ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+    }
+    if (oldVersion < 4) {
+      // افزودن وضعیت «پیش‌فاکتور». مقدار پیش‌فرض ۰ یعنی تمام فاکتورهای
+      // قبلی همچنان فاکتور اصلی محسوب می‌شوند؛ هیچ داده‌ای تغییر نمی‌کند.
+      try {
+        await db.execute('ALTER TABLE invoices ADD COLUMN is_draft INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX idx_invoices_is_draft ON invoices(is_draft)');
       } catch (_) {}
     }
   }
