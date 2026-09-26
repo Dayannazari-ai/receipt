@@ -7,8 +7,10 @@ import '../../repositories/invoice_repository.dart';
 import '../../repositories/customer_repository.dart';
 import '../../repositories/settings_repository.dart';
 import '../../services/pdf_service.dart';
+import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
+import 'edit_draft_invoice_screen.dart';
 
 class InvoiceDetailScreen extends StatefulWidget {
   final int invoiceId;
@@ -22,6 +24,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   final _invoiceRepo = InvoiceRepository();
   final _customerRepo = CustomerRepository();
   final _settingsRepo = SettingsRepository();
+  final _invoiceService = InvoiceService();
 
   Invoice? _invoice;
   List<InvoiceItem> _items = [];
@@ -29,6 +32,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Customer? _customer;
   AppSettings _settings = AppSettings();
   bool _loading = true;
+  bool _converting = false;
 
   @override
   void initState() {
@@ -58,15 +62,71 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     });
   }
 
+  void _showMsg(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  Future<void> _editDraft() async {
+    final inv = _invoice!;
+    final result = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditDraftInvoiceScreen(invoice: inv, items: _items, sideCosts: _sideCosts),
+      ),
+    );
+    if (result == true) _load();
+  }
+
+  Future<void> _confirmConvertToInvoice() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('تبدیل به فاکتور اصلی'),
+        content: const Text(
+            'آیا این پیش‌فاکتور را به فاکتور اصلی تبدیل می‌کنید؟\nپس از تبدیل، ویرایش عادی فاکتور غیرفعال خواهد شد.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('تبدیل به فاکتور اصلی')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _converting = true);
+    try {
+      final newNumber = await _invoiceService.convertDraftToInvoice(_invoice!.id!);
+      if (mounted) {
+        _showMsg('فاکتور با شماره ${PersianDateUtil.toPersianDigits(newNumber)} صادر شد');
+        await _load();
+      }
+    } catch (e) {
+      _showMsg('خطا در تبدیل به فاکتور اصلی: $e');
+    } finally {
+      if (mounted) setState(() => _converting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (_invoice == null) return const Scaffold(body: Center(child: Text('فاکتور یافت نشد')));
     final inv = _invoice!;
+    final isDraft = inv.isDraft == 1;
 
     return Scaffold(
       appBar: AppBar(title: Text('${inv.type.label} - ${PersianDateUtil.toPersianDigits(inv.invoiceNumber)}')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
+        if (isDraft)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(12)),
+            child: const Row(children: [
+              Icon(Icons.edit_note_outlined, color: Colors.orange),
+              SizedBox(width: 8),
+              Expanded(
+                  child: Text('این یک پیش‌فاکتور است و هنوز فاکتور اصلی محسوب نمی‌شود.',
+                      style: TextStyle(fontSize: 13))),
+            ]),
+          ),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -119,28 +179,44 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           Text('توضیحات: ${inv.notes}'),
         ],
         const SizedBox(height: 20),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.visibility_outlined),
-          label: const Text('پیش‌نمایش فاکتور'),
-          onPressed: () async {
-            await Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => Scaffold(
-                appBar: AppBar(title: const Text('پیش‌نمایش فاکتور')),
-                body: PdfPreview(
-                  build: (format) async {
-                    final file = await PdfService.generateInvoicePdf(
-                        invoice: inv, items: _items, sideCosts: _sideCosts, customer: _customer, settings: _settings);
-                    return file.readAsBytes();
-                  },
-                  allowPrinting: true,
-                  allowSharing: true,
-                  canChangePageFormat: false,
-                  canChangeOrientation: false,
+        if (isDraft) ...[
+          ElevatedButton.icon(
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('ویرایش پیش‌فاکتور'),
+            onPressed: _converting ? null : _editDraft,
+          ),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            icon: _converting
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.check_circle_outline),
+            label: const Text('تبدیل به فاکتور اصلی'),
+            onPressed: _converting ? null : _confirmConvertToInvoice,
+          ),
+        ] else
+          ElevatedButton.icon(
+            icon: const Icon(Icons.visibility_outlined),
+            label: const Text('پیش‌نمایش فاکتور'),
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => Scaffold(
+                  appBar: AppBar(title: const Text('پیش‌نمایش فاکتور')),
+                  body: PdfPreview(
+                    build: (format) async {
+                      final file = await PdfService.generateInvoicePdf(
+                          invoice: inv, items: _items, sideCosts: _sideCosts, customer: _customer, settings: _settings);
+                      return file.readAsBytes();
+                    },
+                    allowPrinting: true,
+                    allowSharing: true,
+                    canChangePageFormat: false,
+                    canChangeOrientation: false,
+                  ),
                 ),
-              ),
-            ));
-          },
-        ),
+              ));
+            },
+          ),
       ]),
     );
   }
