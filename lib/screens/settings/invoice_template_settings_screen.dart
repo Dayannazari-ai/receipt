@@ -47,6 +47,7 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
       invoiceId: 0,
       itemType: InvoiceItemType.service,
       description: 'اجرت شارژ و گاز R134 و تزریق گاز',
+      itemCode: '1250',
       quantity: 1,
       unitPrice: 200000,
       total: 200000,
@@ -55,6 +56,7 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
       invoiceId: 0,
       itemType: InvoiceItemType.service,
       description: 'باز و بست اوپراتور با داشبورد',
+      itemCode: '1251',
       quantity: 1,
       unitPrice: 1200000,
       total: 1200000,
@@ -63,6 +65,7 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
       invoiceId: 0,
       itemType: InvoiceItemType.service,
       description: 'باز و بست کندانسور',
+      itemCode: '1252',
       quantity: 1,
       unitPrice: 1500000,
       total: 1500000,
@@ -290,6 +293,7 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
       tableCellFontSize: d.tableCellFontSize,
       tableHeaderFontSize: d.tableHeaderFontSize,
       colWidthRow: d.colWidthRow,
+      colWidthItemCode: d.colWidthItemCode,
       colWidthDescription: d.colWidthDescription,
       colWidthUnitPrice: d.colWidthUnitPrice,
       colWidthTotalPrice: d.colWidthTotalPrice,
@@ -299,7 +303,11 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
 
   /// مجموع عرض ستون‌ها (فقط برای نمایش؛ در PDF فقط نسبت‌ها مهم‌اند).
   double get _colWidthSum =>
-      _layout.colWidthRow + _layout.colWidthDescription + _layout.colWidthUnitPrice + _layout.colWidthTotalPrice;
+      _layout.colWidthRow +
+      _layout.colWidthItemCode +
+      _layout.colWidthDescription +
+      _layout.colWidthUnitPrice +
+      _layout.colWidthTotalPrice;
 
   String _percentOfSum(double v) {
     final sum = _colWidthSum;
@@ -362,6 +370,11 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
           label: 'ستون ردیف',
           value: _layout.colWidthRow,
           onChanged: (v) => _update(_layout.copyWith(colWidthRow: v)),
+        ),
+        _columnWidthRow(
+          label: 'ستون کد کالا/خدمت',
+          value: _layout.colWidthItemCode,
+          onChanged: (v) => _update(_layout.copyWith(colWidthItemCode: v)),
         ),
         _columnWidthRow(
           label: 'ستون شرح',
