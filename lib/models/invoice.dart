@@ -130,8 +130,9 @@ class Invoice {
       );
 }
 
-/// ردیف فاکتور. قیمت واحد در لحظه‌ی صدور فریز می‌شود و با تغییر قیمت خدمت/کالا
-/// در آینده، این مقدار دیگر تغییر نمی‌کند.
+/// ردیف فاکتور. قیمت واحد و کد کالا/خدمت در لحظه‌ی صدور فریز می‌شوند و با
+/// تغییر بعدی قیمت یا کد در بانک اطلاعاتی کالا/خدمت، این مقادیر دیگر
+/// تغییر نمی‌کنند.
 class InvoiceItem {
   final int? id;
   final int invoiceId;
@@ -139,6 +140,7 @@ class InvoiceItem {
   final int? serviceId;
   final int? productId;
   final String description;
+  final String? itemCode; // کد کالا/خدمت، فریزشده در لحظه‌ی ثبت ردیف
   final int quantity;
   final double unitPrice;
   final double total;
@@ -150,6 +152,7 @@ class InvoiceItem {
     this.serviceId,
     this.productId,
     required this.description,
+    this.itemCode,
     required this.quantity,
     required this.unitPrice,
     required this.total,
@@ -162,6 +165,7 @@ class InvoiceItem {
         'service_id': serviceId,
         'product_id': productId,
         'description': description,
+        'item_code': itemCode,
         'quantity': quantity,
         'unit_price': unitPrice,
         'total': total,
@@ -174,6 +178,7 @@ class InvoiceItem {
         serviceId: map['service_id'] as int?,
         productId: map['product_id'] as int?,
         description: map['description'] as String,
+        itemCode: map['item_code'] as String?,
         quantity: map['quantity'] as int,
         unitPrice: (map['unit_price'] as num).toDouble(),
         total: (map['total'] as num).toDouble(),
