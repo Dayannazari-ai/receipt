@@ -40,6 +40,12 @@ class _Palette {
 /// تمام اندازه‌ها، فاصله‌ها، ضخامت‌ها و رنگ‌ها از [InvoiceLayoutSettings]
 /// خوانده می‌شوند و هیچ عدد ظاهری‌ای در این فایل hard-code نشده است.
 ///
+/// جدول اقلام هیچ سقف تعداد ردیف ندارد و هرگز با ردیف خالی پر نمی‌شود؛
+/// تعداد ردیف دقیقاً برابر تعداد اقلام واقعی فاکتور است. جدول اقلام و جدول
+/// هزینه‌های جانبی دو آیتم مستقل در بدنه‌ی سند هستند، به همین دلیل
+/// pw.MultiPage هرگز هزینه‌های جانبی را قبل از پایان کامل اقلام اصلی شروع
+/// نمی‌کند و صفحه‌بندی بر اساس فضای واقعی هر صفحه انجام می‌شود.
+///
 /// ⚠️ برای نمایش صحیح فارسی، حتماً این دو فایل باید در assets/fonts وجود
 /// داشته باشند: Vazirmatn-Regular.ttf و Vazirmatn-Bold.ttf
 ///
@@ -140,15 +146,35 @@ class PdfService {
         header: (context) => _header(l, c, settings, invoice),
         footer: (context) => _bottomBar(l, c),
         build: (context) => [
+          // اطلاعات مشتری، خارج از جدول‌ها، یک آیتم مستقل.
           pw.Padding(
-            padding: pw.EdgeInsets.fromLTRB(
-                l.pageMarginLeft, l.pageMarginTop, l.pageMarginRight, l.pageMarginBottom),
+            padding: pw.EdgeInsets.fromLTRB(l.pageMarginLeft, l.pageMarginTop, l.pageMarginRight, 0),
+            child: customer != null
+                ? pw.Column(children: [
+                    _customerInfo(l, c, customer),
+                    pw.SizedBox(height: l.spacingAfterCustomerBox),
+                  ])
+                : pw.SizedBox(),
+          ),
+          // جدول اقلام اصلی: آیتم مستقل، بدون هیچ ردیف خالی؛ تعداد ردیف
+          // دقیقاً برابر تعداد اقلام واقعی است و pw.Table خودش بین صفحات
+          // بر اساس فضای واقعی می‌شکند.
+          pw.Padding(
+            padding: pw.EdgeInsets.fromLTRB(l.pageMarginLeft, 0, l.pageMarginRight, 0),
+            child: _itemsTable(l, c, items),
+          ),
+          // جدول هزینه‌های جانبی: فقط اگر وجود داشته باشد، و همیشه به‌عنوان
+          // آیتم بعدیِ کامل، بعد از پایان کامل جدول اقلام اصلی.
+          if (sideCosts.isNotEmpty)
+            pw.Padding(
+              padding: pw.EdgeInsets.fromLTRB(l.pageMarginLeft, l.sideCostsTopSpacing, l.pageMarginRight, 0),
+              child: _sideCostsTable(l, c, sideCosts, settings),
+            ),
+          // بخش پایانی: جمع کل + توضیحات + نکات مهم + امضا، همیشه بعد از
+          // پایان کامل هزینه‌های جانبی.
+          pw.Padding(
+            padding: pw.EdgeInsets.fromLTRB(l.pageMarginLeft, l.spacingAfterTable, l.pageMarginRight, l.pageMarginBottom),
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-              if (customer != null) _customerInfo(l, c, customer),
-              pw.SizedBox(height: l.spacingAfterCustomerBox),
-              _itemsTable(l, c, items),
-              if (sideCosts.isNotEmpty) ..._sideCostsSection(l, c, sideCosts, settings),
-              pw.SizedBox(height: l.spacingAfterTable),
               _totals(l, c, invoice, settings),
               if ((invoice.notes ?? '').isNotEmpty) ..._notesSection(l, c, invoice.notes!),
               pw.SizedBox(height: l.spacingAfterTotals),
@@ -286,13 +312,15 @@ class PdfService {
     );
   }
 
-  /// جدول اقلام: فقط ۴ ستون (ردیف / شرح / قیمت واحد / قیمت کل)، بدون ستون تخفیف.
+  /// جدول اقلام: ۵ ستون (ردیف / کد کالا‌خدمت / شرح / قیمت واحد / قیمت کل)،
+  /// بدون ستون تخفیف. تعداد ردیف دقیقاً برابر تعداد اقلام واقعی است؛ هیچ
+  /// ردیف خالی برای رساندن به یک عدد ثابت اضافه نمی‌شود، پس فاکتورهای کم‌قلم
+  /// جمع‌وجور می‌مانند و فاکتورهای پرقلم بدون سقف به صفحات بعد ادامه می‌یابند.
+  ///
   /// نکته‌ی فنی: ویجت Table جهت RTL سند را برای ترتیب فیزیکی ستون‌ها در نظر
   /// نمی‌گیرد، پس ترتیب لیست دستی برعکس شده: ایندکس ۰ = چپ‌ترین (قیمت کل)،
-  /// ایندکس ۳ = راست‌ترین (ردیف).
+  /// ایندکس ۴ = راست‌ترین (ردیف).
   static pw.Widget _itemsTable(InvoiceLayoutSettings l, _Palette c, List<InvoiceItem> items) {
-    final rowCount = items.length > l.tableMinRows.toInt() ? items.length : l.tableMinRows.toInt();
-
     pw.Widget cell(String text) => pw.Padding(
           padding: pw.EdgeInsets.symmetric(
               vertical: l.tableRowVerticalPadding, horizontal: l.tableCellHorizontalPadding),
@@ -303,7 +331,7 @@ class PdfService {
 
     pw.TableRow headerRow() => pw.TableRow(
           decoration: pw.BoxDecoration(color: c.darkGray),
-          children: ['قیمت کل', 'قیمت واحد', 'شرح', 'ردیف']
+          children: ['قیمت کل', 'قیمت واحد', 'شرح', 'کد کالا/خدمت', 'ردیف']
               .map((v) => pw.Container(
                     alignment: pw.Alignment.center,
                     padding: pw.EdgeInsets.symmetric(
@@ -329,39 +357,83 @@ class PdfService {
         0: pw.FlexColumnWidth(l.colWidthTotalPrice),
         1: pw.FlexColumnWidth(l.colWidthUnitPrice),
         2: pw.FlexColumnWidth(l.colWidthDescription),
-        3: pw.FlexColumnWidth(l.colWidthRow),
+        3: pw.FlexColumnWidth(l.colWidthItemCode),
+        4: pw.FlexColumnWidth(l.colWidthRow),
       },
       children: [
         headerRow(),
-        for (var i = 0; i < rowCount; i++)
-          i < items.length
-              ? dataRow([
-                  CurrencyFormatter.formatPlain(items[i].total),
-                  CurrencyFormatter.formatPlain(items[i].unitPrice),
-                  items[i].description,
-                  PersianDateUtil.toPersianDigits('${i + 1}'),
-                ], i.isEven)
-              : dataRow(['', '', '', PersianDateUtil.toPersianDigits('${i + 1}')], i.isEven),
+        for (var i = 0; i < items.length; i++)
+          dataRow([
+            CurrencyFormatter.formatPlain(items[i].total),
+            CurrencyFormatter.formatPlain(items[i].unitPrice),
+            items[i].description,
+            (items[i].itemCode == null || items[i].itemCode!.isEmpty)
+                ? '—'
+                : PersianDateUtil.toPersianDigits(items[i].itemCode!),
+            PersianDateUtil.toPersianDigits('${i + 1}'),
+          ], i.isEven),
       ],
     );
   }
 
-  static List<pw.Widget> _sideCostsSection(
+  /// جدول مستقل هزینه‌های جانبی: ردیف / شرح هزینه / مبلغ. همیشه بعد از
+  /// پایان کامل جدول اقلام اصلی می‌آید، هرگز بین اقلام اصلی قرار نمی‌گیرد،
+  /// چون خودش یک آیتم مستقل در لیست build سند است.
+  static pw.Widget _sideCostsTable(
       InvoiceLayoutSettings l, _Palette c, List<SideCost> sideCosts, AppSettings settings) {
-    return [
-      pw.SizedBox(height: l.sideCostsTopSpacing),
+    pw.Widget cell(String text) => pw.Padding(
+          padding: pw.EdgeInsets.symmetric(
+              vertical: l.tableRowVerticalPadding, horizontal: l.tableCellHorizontalPadding),
+          child: pw.Text(text,
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(fontSize: l.sideCostsItemFontSize, color: c.text)),
+        );
+
+    pw.TableRow headerRow() => pw.TableRow(
+          decoration: pw.BoxDecoration(color: c.darkGray),
+          children: ['مبلغ', 'شرح هزینه', 'ردیف']
+              .map((v) => pw.Container(
+                    alignment: pw.Alignment.center,
+                    padding: pw.EdgeInsets.symmetric(
+                        vertical: l.tableRowVerticalPadding + l.tableHeaderExtraVerticalPadding),
+                    child: pw.Text(v,
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                            fontSize: l.sideCostsTitleFontSize,
+                            fontWeight: pw.FontWeight.bold,
+                            color: c.white)),
+                  ))
+              .toList(),
+        );
+
+    pw.TableRow dataRow(List<String> values, bool isEven) => pw.TableRow(
+          decoration: pw.BoxDecoration(color: isEven ? c.lightGray : c.white),
+          children: values.map(cell).toList(),
+        );
+
+    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
       pw.Text('هزینه‌های جانبی',
           style: pw.TextStyle(
               fontWeight: pw.FontWeight.bold, fontSize: l.sideCostsTitleFontSize, color: c.darkGray)),
-      ...sideCosts.map((sc) => pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(sc.title, style: pw.TextStyle(fontSize: l.sideCostsItemFontSize, color: c.text)),
-              pw.Text(CurrencyFormatter.format(sc.amount, settings.currency),
-                  style: pw.TextStyle(fontSize: l.sideCostsItemFontSize, color: c.text)),
-            ],
-          )),
-    ];
+      pw.SizedBox(height: 3),
+      pw.Table(
+        border: pw.TableBorder.all(color: c.border, width: l.tableBorderWidth),
+        columnWidths: const {
+          0: pw.FlexColumnWidth(0.30), // مبلغ
+          1: pw.FlexColumnWidth(0.55), // شرح هزینه
+          2: pw.FlexColumnWidth(0.15), // ردیف
+        },
+        children: [
+          headerRow(),
+          for (var i = 0; i < sideCosts.length; i++)
+            dataRow([
+              CurrencyFormatter.format(sideCosts[i].amount, settings.currency),
+              sideCosts[i].title,
+              PersianDateUtil.toPersianDigits('${i + 1}'),
+            ], i.isEven),
+        ],
+      ),
+    ]);
   }
 
   static List<pw.Widget> _notesSection(InvoiceLayoutSettings l, _Palette c, String notes) {
