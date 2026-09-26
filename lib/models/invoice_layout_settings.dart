@@ -69,6 +69,7 @@ class InvoiceLayoutSettings {
   final double tableCellHorizontalPadding;
   final double tableBorderWidth;
   final double colWidthRow;
+  final double colWidthItemCode; // عرض ستون «کد کالا/خدمت»
   final double colWidthDescription;
   final double colWidthUnitPrice;
   final double colWidthTotalPrice;
@@ -182,7 +183,8 @@ class InvoiceLayoutSettings {
     this.tableCellHorizontalPadding = 2,
     this.tableBorderWidth = 0.5,
     this.colWidthRow = 0.08,
-    this.colWidthDescription = 0.52,
+    this.colWidthItemCode = 0.12,
+    this.colWidthDescription = 0.40,
     this.colWidthUnitPrice = 0.20,
     this.colWidthTotalPrice = 0.20,
     this.spacingAfterTable = 6,
@@ -308,6 +310,7 @@ class InvoiceLayoutSettings {
       tableCellHorizontalPadding: dbl('tableCellHorizontalPadding', d.tableCellHorizontalPadding),
       tableBorderWidth: dbl('tableBorderWidth', d.tableBorderWidth),
       colWidthRow: dbl('colWidthRow', d.colWidthRow),
+      colWidthItemCode: dbl('colWidthItemCode', d.colWidthItemCode),
       colWidthDescription: dbl('colWidthDescription', d.colWidthDescription),
       colWidthUnitPrice: dbl('colWidthUnitPrice', d.colWidthUnitPrice),
       colWidthTotalPrice: dbl('colWidthTotalPrice', d.colWidthTotalPrice),
@@ -411,6 +414,7 @@ class InvoiceLayoutSettings {
         'tableCellHorizontalPadding': tableCellHorizontalPadding,
         'tableBorderWidth': tableBorderWidth,
         'colWidthRow': colWidthRow,
+        'colWidthItemCode': colWidthItemCode,
         'colWidthDescription': colWidthDescription,
         'colWidthUnitPrice': colWidthUnitPrice,
         'colWidthTotalPrice': colWidthTotalPrice,
@@ -512,6 +516,7 @@ class InvoiceLayoutSettings {
     double? tableCellHorizontalPadding,
     double? tableBorderWidth,
     double? colWidthRow,
+    double? colWidthItemCode,
     double? colWidthDescription,
     double? colWidthUnitPrice,
     double? colWidthTotalPrice,
@@ -615,6 +620,7 @@ class InvoiceLayoutSettings {
       tableCellHorizontalPadding: tableCellHorizontalPadding ?? this.tableCellHorizontalPadding,
       tableBorderWidth: tableBorderWidth ?? this.tableBorderWidth,
       colWidthRow: colWidthRow ?? this.colWidthRow,
+      colWidthItemCode: colWidthItemCode ?? this.colWidthItemCode,
       colWidthDescription: colWidthDescription ?? this.colWidthDescription,
       colWidthUnitPrice: colWidthUnitPrice ?? this.colWidthUnitPrice,
       colWidthTotalPrice: colWidthTotalPrice ?? this.colWidthTotalPrice,
