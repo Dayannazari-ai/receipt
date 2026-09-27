@@ -60,6 +60,7 @@ class Invoice {
   final String invoiceNumber;
   final InvoiceType type;
   final int? customerId;
+  final int? vehicleId; // اتصال اختیاری به خودروی مشتری؛ فاکتور بدون خودرو هم مجاز است
   final String issueDate;
   final double itemsTotal;
   final double sideCosts;
@@ -70,6 +71,7 @@ class Invoice {
   final String? notes;
   final int isDeleted;
   final int isDraft; // ۱ = پیش‌فاکتور (هنوز فاکتور اصلی نشده)، ۰ = فاکتور اصلی
+  final String? backupUid; // شناسه‌ی پایدار یکتا، مستقل از invoice_number، برای Backup/Restore
   final String createdAt;
 
   Invoice({
@@ -77,6 +79,7 @@ class Invoice {
     required this.invoiceNumber,
     required this.type,
     this.customerId,
+    this.vehicleId,
     required this.issueDate,
     required this.itemsTotal,
     required this.sideCosts,
@@ -87,6 +90,7 @@ class Invoice {
     this.notes,
     this.isDeleted = 0,
     this.isDraft = 0,
+    this.backupUid,
     String? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
 
@@ -98,6 +102,7 @@ class Invoice {
         'invoice_number': invoiceNumber,
         'type': type.dbValue,
         'customer_id': customerId,
+        'vehicle_id': vehicleId,
         'issue_date': issueDate,
         'items_total': itemsTotal,
         'side_costs': sideCosts,
@@ -108,6 +113,7 @@ class Invoice {
         'notes': notes,
         'is_deleted': isDeleted,
         'is_draft': isDraft,
+        'backup_uid': backupUid,
         'created_at': createdAt,
       };
 
@@ -116,6 +122,7 @@ class Invoice {
         invoiceNumber: map['invoice_number'] as String,
         type: InvoiceTypeX.fromDb(map['type'] as String),
         customerId: map['customer_id'] as int?,
+        vehicleId: map['vehicle_id'] as int?,
         issueDate: map['issue_date'] as String,
         itemsTotal: (map['items_total'] as num).toDouble(),
         sideCosts: (map['side_costs'] as num).toDouble(),
@@ -126,6 +133,7 @@ class Invoice {
         notes: map['notes'] as String?,
         isDeleted: map['is_deleted'] as int? ?? 0,
         isDraft: map['is_draft'] as int? ?? 0,
+        backupUid: map['backup_uid'] as String?,
         createdAt: map['created_at'] as String?,
       );
 }
