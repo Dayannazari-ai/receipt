@@ -15,7 +15,11 @@ class DatabaseHelper {
   // نسخه ۵: افزودن ستون item_code به invoice_items؛ کد کالا/خدمت در لحظه‌ی
   // صدور یا ذخیره‌ی هر ردیف فریز می‌شود، درست مانند unit_price، و با تغییر
   // بعدی Product.code یا ServiceItem.code تغییر نمی‌کند.
-  static const int dbVersion = 5;
+  // نسخه ۶: افزودن جدول vehicles (رابطه‌ی مشتری↔خودرو، هر مشتری چند
+  // خودرو) و ستون‌های invoices.vehicle_id (اتصال اختیاری فاکتور به خودرو)
+  // و invoices.backup_uid (شناسه‌ی پایدار و یکتا برای تشخیص دقیق فاکتور
+  // در عملیات Backup/Restore، مستقل از invoice_number).
+  static const int dbVersion = 6;
 
   Database? _db;
 
@@ -38,7 +42,7 @@ class DatabaseHelper {
   }
 
   /// نصب تازه (کاربر جدید): جداول از همان ابتدا شامل voice_search_label،
-  /// is_draft و item_code هستند.
+  /// is_draft، item_code، vehicles و ستون‌های vehicle_id/backup_uid هستند.
   Future<void> _onCreate(Database db, int version) async {
     final batch = db.batch();
 
@@ -71,6 +75,26 @@ class DatabaseHelper {
       )
     ''');
     batch.execute('CREATE INDEX idx_vehicle_models_brand ON vehicle_models(brand_id)');
+
+    // خودروهای متعلق به مشتریان (رابطه‌ی یک‌به‌چند: هر مشتری چند خودرو).
+    // برند/مدل به جدول‌های مرجع بالا اشاره می‌کنند تا داده‌ی تکراری نسازیم.
+    batch.execute('''
+      CREATE TABLE vehicles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        brand_id INTEGER,
+        model_id INTEGER,
+        plate_number TEXT,
+        notes TEXT,
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (brand_id) REFERENCES vehicle_brands(id),
+        FOREIGN KEY (model_id) REFERENCES vehicle_models(id)
+      )
+    ''');
+    batch.execute('CREATE INDEX idx_vehicles_customer ON vehicles(customer_id)');
+    batch.execute('CREATE INDEX idx_vehicles_plate ON vehicles(plate_number)');
 
     batch.execute('''
       CREATE TABLE service_categories (
@@ -142,12 +166,16 @@ class DatabaseHelper {
       )
     ''');
 
+    // invoices: افزوده شده vehicle_id (اتصال اختیاری به خودرو) و backup_uid
+    // (شناسه‌ی پایدار یکتا، مستقل از invoice_number، برای تشخیص دقیق فاکتور
+    // در عملیات Backup/Restore).
     batch.execute('''
       CREATE TABLE invoices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         invoice_number TEXT NOT NULL UNIQUE,
         type TEXT NOT NULL,
         customer_id INTEGER,
+        vehicle_id INTEGER,
         issue_date TEXT NOT NULL,
         items_total REAL NOT NULL DEFAULT 0,
         side_costs REAL NOT NULL DEFAULT 0,
@@ -158,15 +186,19 @@ class DatabaseHelper {
         notes TEXT,
         is_deleted INTEGER NOT NULL DEFAULT 0,
         is_draft INTEGER NOT NULL DEFAULT 0,
+        backup_uid TEXT,
         created_at TEXT NOT NULL,
-        FOREIGN KEY (customer_id) REFERENCES customers(id)
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
       )
     ''');
     batch.execute('CREATE INDEX idx_invoices_number ON invoices(invoice_number)');
     batch.execute('CREATE INDEX idx_invoices_customer ON invoices(customer_id)');
+    batch.execute('CREATE INDEX idx_invoices_vehicle ON invoices(vehicle_id)');
     batch.execute('CREATE INDEX idx_invoices_date ON invoices(issue_date)');
     batch.execute('CREATE INDEX idx_invoices_type ON invoices(type)');
     batch.execute('CREATE INDEX idx_invoices_is_draft ON invoices(is_draft)');
+    batch.execute('CREATE UNIQUE INDEX idx_invoices_backup_uid ON invoices(backup_uid)');
 
     batch.execute('''
       CREATE TABLE invoice_items (
@@ -255,6 +287,52 @@ class DatabaseHelper {
       // داده می‌شوند؛ هیچ داده‌ای بازنویسی یا حذف نمی‌شود.
       try {
         await db.execute('ALTER TABLE invoice_items ADD COLUMN item_code TEXT');
+      } catch (_) {}
+    }
+    if (oldVersion < 6) {
+      // جدول خودروها. رابطه‌ی یک‌به‌چند با مشتری؛ هیچ داده‌ی قبلی تحت تأثیر
+      // قرار نمی‌گیرد چون این یک جدول کاملاً جدید است.
+      try {
+        await db.execute('''
+          CREATE TABLE vehicles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL,
+            brand_id INTEGER,
+            model_id INTEGER,
+            plate_number TEXT,
+            notes TEXT,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (brand_id) REFERENCES vehicle_brands(id),
+            FOREIGN KEY (model_id) REFERENCES vehicle_models(id)
+          )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX idx_vehicles_customer ON vehicles(customer_id)');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX idx_vehicles_plate ON vehicles(plate_number)');
+      } catch (_) {}
+      // ستون اتصال اختیاری فاکتور به خودرو؛ رکوردهای قدیمی NULL می‌گیرند
+      // و هیچ فاکتور موجودی تحت تأثیر قرار نمی‌گیرد.
+      try {
+        await db.execute('ALTER TABLE invoices ADD COLUMN vehicle_id INTEGER');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX idx_invoices_vehicle ON invoices(vehicle_id)');
+      } catch (_) {}
+      // شناسه‌ی پایدار برای Backup/Restore؛ رکوردهای قدیمی NULL می‌گیرند.
+      // Repository هنگام هر insert جدید یک UUID تازه تولید می‌کند؛ برای
+      // فاکتورهای قدیمی که از قبل وجود داشتند، این مقدار تا اولین
+      // Backup/Restore که به آن‌ها برسد NULL باقی می‌ماند و تشخیص Merge
+      // برای آن‌ها به شماره‌ی فاکتور و محتوا متکی می‌شود، نه backup_uid.
+      try {
+        await db.execute('ALTER TABLE invoices ADD COLUMN backup_uid TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE UNIQUE INDEX idx_invoices_backup_uid ON invoices(backup_uid)');
       } catch (_) {}
     }
   }
