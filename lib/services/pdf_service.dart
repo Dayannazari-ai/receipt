@@ -331,7 +331,7 @@ class PdfService {
 
     pw.TableRow headerRow() => pw.TableRow(
           decoration: pw.BoxDecoration(color: c.darkGray),
-          children: ['قیمت کل', 'قیمت واحد', 'شرح', 'کد کالا/خدمت', 'ردیف']
+          children: ['قیمت کل', 'قیمت واحد', 'شرح', 'کد', 'ردیف']
               .map((v) => pw.Container(
                     alignment: pw.Alignment.center,
                     padding: pw.EdgeInsets.symmetric(
