@@ -5,12 +5,14 @@ import '../../models/invoice.dart';
 import '../../models/customer.dart';
 import '../../models/product.dart';
 import '../../models/service.dart';
+import '../../models/vehicle.dart';
 import '../../models/vehicle_reference.dart';
 import '../../models/payment_account.dart';
 import '../../models/app_settings.dart';
 import '../../repositories/customer_repository.dart';
 import '../../repositories/product_repository.dart';
 import '../../repositories/service_repository.dart';
+import '../../repositories/vehicle_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
 import '../../repositories/payment_account_repository.dart';
 import '../../repositories/settings_repository.dart';
@@ -19,6 +21,7 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../../utils/thousands_input_formatter.dart';
 import '../products/barcode_scanner_screen.dart';
+import '../vehicles/vehicle_picker_sheet.dart';
 import '../voice_search_sheet.dart';
 import '../products/product_form_screen.dart';
 
@@ -48,6 +51,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   final _productRepo = ProductRepository();
   final _paymentRepo = PaymentAccountRepository();
   final _settingsRepo = SettingsRepository();
+  final _vehicleRepo = VehicleRepository();
   final _invoiceService = InvoiceService();
 
   final _nameCtrl = TextEditingController();
@@ -61,6 +65,8 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   List<PaymentAccount> _accounts = [];
   AppSettings _settings = AppSettings();
   int? _selectedCustomerId;
+  Vehicle? _selectedVehicle;
+  String _selectedVehicleLabel = '';
 
   late final List<InvoiceCartLine> _lines;
   late final List<SideCostLine> _sideCosts;
@@ -96,6 +102,24 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     _init();
   }
 
+  Future<String> _buildVehicleLabel(Vehicle v) async {
+    final refRepo = VehicleReferenceRepository();
+    final brands = await refRepo.getAllBrands();
+    final brandNames = {for (final b in brands) b.id!: b.name};
+    String modelName = '';
+    if (v.brandId != null && v.modelId != null) {
+      final ms = await refRepo.getModelsByBrand(v.brandId!);
+      final match = ms.where((m) => m.id == v.modelId);
+      if (match.isNotEmpty) modelName = match.first.name;
+    }
+    final parts = <String>[
+      if (v.brandId != null) brandNames[v.brandId] ?? '',
+      modelName,
+      if ((v.plateNumber ?? '').isNotEmpty) v.plateNumber!,
+    ].where((p) => p.isNotEmpty).toList();
+    return parts.isEmpty ? 'خودروی بدون مشخصات' : parts.join(' - ');
+  }
+
   Future<void> _init() async {
     final settings = await _settingsRepo.getSettings();
     final accounts = await _paymentRepo.getAll();
@@ -110,11 +134,19 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     if (widget.invoice.paymentAccountInfo != null) {
       selectedAccount = accounts.where((a) => widget.invoice.paymentAccountInfo!.startsWith(a.title)).firstOrNull;
     }
+    Vehicle? vehicle;
+    String vehicleLabel = '';
+    if (widget.invoice.vehicleId != null) {
+      vehicle = await _vehicleRepo.getById(widget.invoice.vehicleId!);
+      if (vehicle != null) vehicleLabel = await _buildVehicleLabel(vehicle);
+    }
     if (!mounted) return;
     setState(() {
       _settings = settings;
       _accounts = accounts;
       _selectedAccount = selectedAccount;
+      _selectedVehicle = vehicle;
+      _selectedVehicleLabel = vehicleLabel;
       _loadingInitial = false;
     });
   }
@@ -122,6 +154,11 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   double get _itemsTotal => _lines.fold(0.0, (s, l) => s + l.total);
   double get _sideCostsTotal => _sideCosts.fold(0.0, (s, c) => s + c.amount);
   double get _finalAmount => _itemsTotal + _sideCostsTotal;
+
+  void _clearVehicle() {
+    _selectedVehicle = null;
+    _selectedVehicleLabel = '';
+  }
 
   Future<void> _pickIssueDateTime() async {
     final jalali = await showPersianDatePicker(
@@ -153,11 +190,37 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     );
     if (selected != null) {
       setState(() {
+        // خودروی مشتری قبلی نباید به مشتری جدید بچسبد.
+        if (_selectedCustomerId != selected.id) _clearVehicle();
         _selectedCustomerId = selected.id;
         _nameCtrl.text = selected.name;
         _mobileCtrl.text = selected.mobile;
       });
     }
+  }
+
+  Future<void> _pickVehicle() async {
+    if (_selectedCustomerId == null) {
+      _showMsg('برای انتخاب خودرو، ابتدا مشتری را از لیست انتخاب کنید');
+      return;
+    }
+    final result = await showModalBottomSheet<VehiclePickerResult>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => VehiclePickerSheet(customerId: _selectedCustomerId!),
+    );
+    if (result == null) return;
+    if (result.vehicle == null) {
+      setState(_clearVehicle);
+      return;
+    }
+    final v = result.vehicle!;
+    final label = await _buildVehicleLabel(v);
+    if (!mounted) return;
+    setState(() {
+      _selectedVehicle = v;
+      _selectedVehicleLabel = label;
+    });
   }
 
   Future<void> _addItemManually() async {
@@ -356,10 +419,16 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             Customer(name: _nameCtrl.text.trim(), mobile: _mobileCtrl.text.trim()));
       }
 
+      // اگر خودرو انتخاب شده ولی متعلق به مشتریِ نهایی نیست، رها می‌شود.
+      final vehicleId = (_selectedVehicle != null && _selectedVehicle!.customerId == customerId)
+          ? _selectedVehicle!.id
+          : null;
+
       await _invoiceService.updateDraftInvoice(
         invoiceId: widget.invoice.id!,
         type: _type,
         customerId: customerId,
+        vehicleId: vehicleId,
         lines: _lines,
         sideCosts: _sideCosts,
         paymentType: _paymentType,
@@ -421,16 +490,32 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             TextField(
               controller: _nameCtrl,
               decoration: const InputDecoration(labelText: 'نام مشتری', border: InputBorder.none, filled: false),
-              onChanged: (_) => setState(() => _selectedCustomerId = null),
+              onChanged: (_) => setState(() {
+                _selectedCustomerId = null;
+                _clearVehicle();
+              }),
             ),
             const Divider(height: 1),
             TextField(
               controller: _mobileCtrl,
               decoration: const InputDecoration(labelText: 'شماره تماس', border: InputBorder.none, filled: false),
               keyboardType: TextInputType.phone,
-              onChanged: (_) => setState(() => _selectedCustomerId = null),
+              onChanged: (_) => setState(() {
+                _selectedCustomerId = null;
+                _clearVehicle();
+              }),
             ),
           ]),
+        ),
+        const SizedBox(height: 10),
+        ListTile(
+          tileColor: const Color(0xFFEFEFF1),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          leading: const Icon(Icons.directions_car_outlined),
+          title: const Text('خودرو'),
+          subtitle: Text(_selectedVehicle == null ? 'انتخاب نشده (اختیاری)' : _selectedVehicleLabel),
+          trailing: const Icon(Icons.chevron_left),
+          onTap: _pickVehicle,
         ),
         const SizedBox(height: 20),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
