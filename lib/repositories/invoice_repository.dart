@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import '../database/database_helper.dart';
 import '../models/invoice.dart';
@@ -10,6 +11,17 @@ class InvoiceRepository {
   /// پیشوند سری پیش‌فاکتور. کاملاً جدا از پیشوندهای فاکتور اصلی، تا هیچ
   /// شماره‌ای از سری اصلی توسط پیش‌فاکتور مصرف نشود.
   static const String _draftPrefix = 'DRAFT';
+
+  static final Random _random = Random();
+
+  /// تولید شناسه‌ی پایدار یکتا برای Backup/Restore. ترکیب زمان با میکروثانیه و
+  /// یک عدد تصادفی؛ برای هدف تشخیص یکتایی فاکتور روی یک دستگاه کاملاً کافی
+  /// است و نیازی به پکیج خارجی ندارد.
+  static String generateBackupUid() {
+    final micros = DateTime.now().microsecondsSinceEpoch;
+    final rnd = _random.nextInt(0x7FFFFFFF);
+    return 'inv-${micros.toRadixString(36)}-${rnd.toRadixString(36)}';
+  }
 
   /// شماره فاکتور با پیشوند انگلیسی نوع فاکتور، با ممیز جدا می‌شود.
   /// B = برق خودرو، M = مکانیک, J = جلوبندی، SL = فروش کالا, PR = خرید کالا
@@ -103,6 +115,10 @@ class InvoiceRepository {
 
   /// صدور فاکتور یا ثبت پیش‌فاکتور.
   ///
+  /// هر فاکتور جدید یک backup_uid یکتا می‌گیرد (اگر ورودی خالی باشد). این
+  /// شناسه هرگز تغییر نمی‌کند و در Backup/Restore برای تشخیص دقیق «همان
+  /// فاکتور» استفاده می‌شود.
+  ///
   /// وقتی [isDraft] برابر true باشد:
   /// - رکورد با is_draft = 1 ذخیره می‌شود.
   /// - هیچ اثری روی موجودی کالا یا stock_movements گذاشته نمی‌شود؛ این اثر
@@ -122,7 +138,11 @@ class InvoiceRepository {
           await txn.query('invoices', where: 'invoice_number = ?', whereArgs: [invoice.invoiceNumber]);
       if (existing.isNotEmpty) throw StateError('شماره فاکتور تکراری است');
 
-      final invoiceId = await txn.insert('invoices', invoice.toMap()..remove('id'));
+      final map = invoice.toMap()..remove('id');
+      if (map['backup_uid'] == null || (map['backup_uid'] as String).isEmpty) {
+        map['backup_uid'] = generateBackupUid();
+      }
+      final invoiceId = await txn.insert('invoices', map);
 
       for (final item in items) {
         await txn.insert('invoice_items', item.toMap()..remove('id')..['invoice_id'] = invoiceId);
@@ -150,6 +170,9 @@ class InvoiceRepository {
   /// اجرا می‌شود. تمام این مراحل در یک تراکنش هستند: یا همه انجام می‌شوند
   /// یا هیچ‌کدام.
   ///
+  /// backup_uid رکورد تغییر نمی‌کند؛ همان شناسه‌ی پایدار از پیش‌فاکتور به
+  /// فاکتور اصلی منتقل می‌شود.
+  ///
   /// نکته‌ی فنی مهم: تمام خواندن‌ها/نوشتن‌ها اینجا باید از طریق همان txn
   /// انجام شوند، نه از طریق متدهایی مثل SettingsRepository.getSettings()
   /// که مستقل یک اتصال دیتابیس جدید باز می‌کنند — چون این کار وسط یک
@@ -169,10 +192,6 @@ class InvoiceRepository {
         throw StateError('این رکورد پیش‌فاکتور نیست یا قبلاً به فاکتور اصلی تبدیل شده است');
       }
 
-      // شماره‌ی جدید از سری اصلی، با همان منطق getNextInvoiceNumber ولی
-      // داخل همین تراکنش (تا با فراخوانی همزمان تداخل نکند) و بدون باز
-      // کردن اتصال جدید به دیتابیس (به همین دلیل _readInvoiceStartNumber
-      // به‌جای _settingsRepo.getSettings() استفاده می‌شود).
       final startNumber = await _readInvoiceStartNumber(txn);
       final prefix = _prefixFor(invoice.type);
       final numberRows =
@@ -192,8 +211,6 @@ class InvoiceRepository {
         whereArgs: [invoiceId],
       );
       if (updated == 0) {
-        // رقابت همزمان: بین خواندن و نوشتن، یک فراخوانی دیگر همین رکورد را
-        // تبدیل کرده است. تراکنش با استثنا لغو می‌شود.
         throw StateError('این پیش‌فاکتور توسط عملیات دیگری قبلاً تبدیل شده است');
       }
 
@@ -207,13 +224,14 @@ class InvoiceRepository {
     });
   }
 
-  /// ویرایش کامل یک پیش‌فاکتور: فیلدهای اصلی فاکتور به‌روزرسانی می‌شوند و
-  /// اقلام/هزینه‌های جانبی قبلی حذف و با لیست جدید جایگزین می‌شوند.
+  /// ویرایش کامل یک پیش‌فاکتور: فیلدهای اصلی فاکتور (شامل مشتری و خودرو)
+  /// به‌روزرسانی می‌شوند و اقلام/هزینه‌های جانبی قبلی حذف و با لیست جدید
+  /// جایگزین می‌شوند.
   ///
   /// فقط روی رکوردی با is_draft = 1 عمل می‌کند. اگر رکورد پیش‌فاکتور نباشد
   /// (یعنی قبلاً به فاکتور اصلی تبدیل شده)، استثنا پرتاب می‌شود و هیچ
   /// تغییری اعمال نمی‌شود. هیچ اثری روی موجودی کالا یا stock_movements
-  /// ندارد.
+  /// ندارد. شماره‌ی پیش‌فاکتور و backup_uid آن با ویرایش تغییر نمی‌کنند.
   Future<void> updateDraftInvoice({
     required int invoiceId,
     required Invoice invoice,
@@ -232,7 +250,8 @@ class InvoiceRepository {
       final map = invoice.toMap()
         ..remove('id')
         ..['is_draft'] = 1
-        ..['invoice_number'] = current.invoiceNumber; // شماره‌ی پیش‌فاکتور با ویرایش تغییر نمی‌کند
+        ..['invoice_number'] = current.invoiceNumber // شماره‌ی پیش‌فاکتور با ویرایش تغییر نمی‌کند
+        ..['backup_uid'] = current.backupUid; // شناسه‌ی پایدار هرگز تغییر نمی‌کند
       await txn.update('invoices', map, where: 'id = ?', whereArgs: [invoiceId]);
 
       await txn.delete('invoice_items', where: 'invoice_id = ?', whereArgs: [invoiceId]);
@@ -252,6 +271,7 @@ class InvoiceRepository {
     final rows = await db.query('invoices', where: 'id = ?', whereArgs: [id]);
     return rows.isEmpty ? null : Invoice.fromMap(rows.first);
   }
+
   /// همه‌ی فاکتورهای یک مشتری خاص، بر اساس شناسه‌ی واقعی مشتری (نه نام).
   /// جدیدترین فاکتور اول نمایش داده می‌شود.
   Future<List<Invoice>> getByCustomerId(int customerId) async {
@@ -259,6 +279,17 @@ class InvoiceRepository {
     final rows = await db.query('invoices',
         where: 'customer_id = ? AND is_deleted = 0',
         whereArgs: [customerId],
+        orderBy: 'issue_date DESC');
+    return rows.map((r) => Invoice.fromMap(r)).toList();
+  }
+
+  /// همه‌ی فاکتورهای یک خودرو خاص (فقط فاکتورهای اصلی، نه پیش‌فاکتور)،
+  /// جدیدترین اول.
+  Future<List<Invoice>> getByVehicleId(int vehicleId) async {
+    final db = await _db.database;
+    final rows = await db.query('invoices',
+        where: 'vehicle_id = ? AND is_deleted = 0 AND is_draft = 0',
+        whereArgs: [vehicleId],
         orderBy: 'issue_date DESC');
     return rows.map((r) => Invoice.fromMap(r)).toList();
   }
