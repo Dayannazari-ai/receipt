@@ -34,10 +34,11 @@ class InvoiceService {
 
   Future<String> nextInvoiceNumber(InvoiceType type) => _invoiceRepo.getNextInvoiceNumber(type);
 
-  /// صدور فاکتور اصلی: رفتار کاملاً مثل قبل، بدون هیچ تغییری.
+  /// صدور فاکتور اصلی. [vehicleId] اختیاری است؛ فاکتور بدون خودرو هم مجاز است.
   Future<int> issueInvoice({
     required InvoiceType type,
     int? customerId,
+    int? vehicleId,
     required List<InvoiceCartLine> lines,
     required List<SideCostLine> sideCosts,
     required PaymentType paymentType,
@@ -58,6 +59,7 @@ class InvoiceService {
       invoiceNumber: invoiceNumber,
       type: type,
       customerId: customerId,
+      vehicleId: vehicleId,
       issueDate: (issueDateTime ?? DateTime.now()).toIso8601String(),
       itemsTotal: itemsTotal,
       sideCosts: sideCostsTotal,
@@ -94,6 +96,7 @@ class InvoiceService {
   Future<int> saveDraftInvoice({
     required InvoiceType type,
     int? customerId,
+    int? vehicleId,
     required List<InvoiceCartLine> lines,
     required List<SideCostLine> sideCosts,
     required PaymentType paymentType,
@@ -114,6 +117,7 @@ class InvoiceService {
       invoiceNumber: draftNumber,
       type: type,
       customerId: customerId,
+      vehicleId: vehicleId,
       issueDate: (issueDateTime ?? DateTime.now()).toIso8601String(),
       itemsTotal: itemsTotal,
       sideCosts: sideCostsTotal,
@@ -157,6 +161,7 @@ class InvoiceService {
     required int invoiceId,
     required InvoiceType type,
     int? customerId,
+    int? vehicleId,
     required List<InvoiceCartLine> lines,
     required List<SideCostLine> sideCosts,
     required PaymentType paymentType,
@@ -179,6 +184,7 @@ class InvoiceService {
       invoiceNumber: '',
       type: type,
       customerId: customerId,
+      vehicleId: vehicleId,
       issueDate: issueDateTime.toIso8601String(),
       itemsTotal: itemsTotal,
       sideCosts: sideCostsTotal,
