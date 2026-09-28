@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import '../../models/invoice.dart';
 import '../../models/customer.dart';
+import '../../models/vehicle.dart';
 import '../../models/app_settings.dart';
 import '../../repositories/invoice_repository.dart';
 import '../../repositories/customer_repository.dart';
+import '../../repositories/vehicle_repository.dart';
+import '../../repositories/vehicle_reference_repository.dart';
 import '../../repositories/settings_repository.dart';
 import '../../services/pdf_service.dart';
 import '../../services/invoice_service.dart';
@@ -23,6 +26,7 @@ class InvoiceDetailScreen extends StatefulWidget {
 class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   final _invoiceRepo = InvoiceRepository();
   final _customerRepo = CustomerRepository();
+  final _vehicleRepo = VehicleRepository();
   final _settingsRepo = SettingsRepository();
   final _invoiceService = InvoiceService();
 
@@ -30,6 +34,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   List<InvoiceItem> _items = [];
   List<SideCost> _sideCosts = [];
   Customer? _customer;
+  Vehicle? _vehicle;
+  String _vehicleLabel = '';
   AppSettings _settings = AppSettings();
   bool _loading = true;
   bool _converting = false;
@@ -38,6 +44,24 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<String> _buildVehicleLabel(Vehicle v) async {
+    final refRepo = VehicleReferenceRepository();
+    final brands = await refRepo.getAllBrands();
+    final brandNames = {for (final b in brands) b.id!: b.name};
+    String modelName = '';
+    if (v.brandId != null && v.modelId != null) {
+      final ms = await refRepo.getModelsByBrand(v.brandId!);
+      final match = ms.where((m) => m.id == v.modelId);
+      if (match.isNotEmpty) modelName = match.first.name;
+    }
+    final parts = <String>[
+      if (v.brandId != null) brandNames[v.brandId] ?? '',
+      modelName,
+      if ((v.plateNumber ?? '').isNotEmpty) v.plateNumber!,
+    ].where((p) => p.isNotEmpty).toList();
+    return parts.isEmpty ? 'خودروی بدون مشخصات' : parts.join(' - ');
   }
 
   Future<void> _load() async {
@@ -50,6 +74,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final items = await _invoiceRepo.getItems(widget.invoiceId);
     final sideCosts = await _invoiceRepo.getSideCosts(widget.invoiceId);
     final customer = invoice.customerId != null ? await _customerRepo.getById(invoice.customerId!) : null;
+    Vehicle? vehicle;
+    String vehicleLabel = '';
+    if (invoice.vehicleId != null) {
+      vehicle = await _vehicleRepo.getById(invoice.vehicleId!);
+      if (vehicle != null) vehicleLabel = await _buildVehicleLabel(vehicle);
+    }
     final settings = await _settingsRepo.getSettings();
     if (!mounted) return;
     setState(() {
@@ -57,6 +87,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       _items = items;
       _sideCosts = sideCosts;
       _customer = customer;
+      _vehicle = vehicle;
+      _vehicleLabel = vehicleLabel;
       _settings = settings;
       _loading = false;
     });
@@ -133,6 +165,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (_customer != null) _row('مشتری', _customer!.name),
               if (_customer != null) _row('موبایل', PersianDateUtil.toPersianDigits(_customer!.mobile)),
+              if (_vehicle != null) _row('خودرو', _vehicleLabel),
               _row('تاریخ صدور', PersianDateUtil.formatDate(inv.issueDate)),
               _row('نوع پرداخت', inv.paymentType.label),
               if ((inv.paymentAccountInfo ?? '').isNotEmpty) _row('حساب مقصد', inv.paymentAccountInfo!),
@@ -148,7 +181,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                     it.itemType == InvoiceItemType.service ? Icons.build_outlined : Icons.inventory_2_outlined),
                 title: Text(it.description),
                 subtitle: Text(
-                    '${PersianDateUtil.toPersianDigits('${it.quantity}')} × ${CurrencyFormatter.format(it.unitPrice, _settings.currency)}'),
+                    '${(it.itemCode != null && it.itemCode!.isNotEmpty) ? 'کد: ${it.itemCode}  ' : ''}${PersianDateUtil.toPersianDigits('${it.quantity}')} × ${CurrencyFormatter.format(it.unitPrice, _settings.currency)}'),
                 trailing: Text(CurrencyFormatter.format(it.total, _settings.currency)),
               ),
             )),
@@ -225,7 +258,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text(label, style: TextStyle(color: Colors.grey.shade600)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+          Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.w600))),
         ]),
       );
 
