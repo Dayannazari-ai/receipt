@@ -11,6 +11,7 @@ import '../../services/auth_service.dart';
 import '../../main.dart';
 import 'price_list_import_screen.dart';
 import 'invoice_template_settings_screen.dart';
+import 'backup_restore_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
