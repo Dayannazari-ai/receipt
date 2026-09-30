@@ -232,7 +232,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _doBackup() async {
     setState(() => _busy = true);
     try {
-      final file = await _backupService.createBackup();
+      final file = await _backupService.createLegacyFullDbBackup();
       await _backupService.shareBackup(file);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطا: $e')));
@@ -260,7 +260,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirm != true) return;
     setState(() => _busy = true);
     try {
-      await _backupService.restoreFromPath(pickedPath);
+      await _backupService.restoreLegacyFullDbFromPath(pickedPath);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('بازیابی انجام شد. برنامه را دوباره باز کنید.')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطا: $e')));
