@@ -423,15 +423,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 28),
           const Divider(),
           const SizedBox(height: 12),
-          const Text('پشتیبان‌گیری', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const Text('پشتیبان‌گیری و بازیابی', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const SizedBox(height: 6),
+          const Text('پشتیبان‌گیری و بازیابی مستقل برای هر بخش (مشتریان، محصولات، خدمات، فاکتورها) یا به‌صورت کامل.',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
           const SizedBox(height: 12),
-          OutlinedButton.icon(icon: const Icon(Icons.backup_outlined), label: const Text('تهیه فایل پشتیبان'), onPressed: _doBackup),
-          const SizedBox(height: 10),
           OutlinedButton.icon(
-            icon: const Icon(Icons.restore_outlined),
-            label: const Text('بازیابی از فایل پشتیبان'),
-            style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-            onPressed: _doRestore,
+            icon: const Icon(Icons.backup_outlined),
+            label: const Text('پشتیبان‌گیری و بازیابی'),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const BackupRestoreScreen())),
           ),
 
           const SizedBox(height: 28),
