@@ -151,7 +151,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       return;
     }
     final v = result.vehicle!;
-    final brands = await VehicleReferenceRepository().getAllBrands();
+    final brands = await VehicleReferenceRepository().getAllBrands(includeDeleted: true);
     final brandNames = {for (final b in brands) b.id!: b.name};
     String modelName = '';
     if (v.brandId != null && v.modelId != null) {
@@ -162,7 +162,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     final parts = <String>[
       if (v.brandId != null) brandNames[v.brandId] ?? '',
       modelName,
-      if ((v.plateNumber ?? '').isNotEmpty) v.plateNumber!,
     ].where((p) => p.isNotEmpty).toList();
     if (!mounted) return;
     setState(() {
