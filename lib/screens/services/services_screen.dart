@@ -319,15 +319,29 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     setState(() => _models = models);
   }
 
+  List<_PickerItem> _brandItems() => [
+        const _PickerItem(id: null, label: 'همه برندها'),
+        ..._brands.map((b) => _PickerItem(id: b.id, label: b.name)),
+      ];
+
+  List<_PickerItem> _modelItems() => [
+        const _PickerItem(id: null, label: 'همه مدل‌های این برند'),
+        ..._models.map((m) => _PickerItem(id: m.id, label: m.name)),
+      ];
+
   Future<void> _pickBrand() async {
     final selected = await showModalBottomSheet<int?>(
       context: context,
       builder: (ctx) => _PickerSheet(
         title: 'انتخاب برند',
-        items: [
-          const _PickerItem(id: null, label: 'همه برندها'),
-          ..._brands.map((b) => _PickerItem(id: b.id, label: b.name)),
-        ],
+        items: _brandItems(),
+        deleteTitle: 'حذف برند',
+        deleteMessage:
+            'آیا از حذف این برند مطمئن هستید؟ اگر در مدل‌ها، خدمات یا خودروها استفاده شده باشد، فقط از لیست‌ها مخفی می‌شود و سوابق قبلی حفظ می‌ماند.',
+        reloadItems: () async {
+          await _loadBrands();
+          return _brandItems();
+        },
         onAddNew: (name) async {
           final id = await _vehicleRepo.insertBrand(name);
           await _loadBrands();
@@ -347,7 +361,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
               _models = [];
             });
           }
-          return true;
+          return null;
         },
       ),
     );
@@ -363,18 +377,35 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
 
   Future<void> _pickModel() async {
     if (_brandId == null) return;
+    final brandId = _brandId!;
     final selected = await showModalBottomSheet<int?>(
       context: context,
       builder: (ctx) => _PickerSheet(
         title: 'انتخاب مدل',
-        items: [
-          const _PickerItem(id: null, label: 'همه مدل‌های این برند'),
-          ..._models.map((m) => _PickerItem(id: m.id, label: m.name)),
-        ],
+        items: _modelItems(),
+        deleteTitle: 'حذف مدل',
+        deleteMessage: 'آیا از حذف این مدل مطمئن هستید؟',
+        reloadItems: () async {
+          await _loadModels(brandId);
+          return _modelItems();
+        },
         onAddNew: (name) async {
-          final id = await _vehicleRepo.insertModel(_brandId!, name);
-          await _loadModels(_brandId!);
+          final id = await _vehicleRepo.insertModel(brandId, name);
+          await _loadModels(brandId);
           return id;
+        },
+        onEdit: (id, newName) async {
+          await _vehicleRepo.updateModel(id, newName);
+          await _loadModels(brandId);
+        },
+        onDelete: (id) async {
+          // مدلی که در خدمات یا خودروها استفاده شده حذف نمی‌شود تا هیچ
+          // سابقه‌ای خراب نشود؛ در این حالت پیام خطا برمی‌گردد.
+          final deleted = await _vehicleRepo.deleteModel(id);
+          if (!deleted) return 'این مدل در خدمات یا خودروها استفاده شده و قابل حذف نیست. فقط می‌توانید نام آن را ویرایش کنید.';
+          await _loadModels(brandId);
+          if (_modelId == id) setState(() => _modelId = null);
+          return null;
         },
       ),
     );
@@ -522,18 +553,28 @@ class _PickerItem {
   const _PickerItem({required this.id, required this.label});
 }
 
+/// Sheet انتخاب با امکان افزودن (دکمه‌ی +) و ویرایش/حذف (نگه‌داشتن طولانی
+/// روی هر آیتم). onDelete اگر null برگرداند یعنی حذف موفق بود، و اگر متن
+/// برگرداند یعنی حذف انجام نشد و آن متن به کاربر نشان داده می‌شود.
+/// reloadItems اگر داده شود، لیست بعد از ویرایش/حذف در همان Sheet تازه می‌شود.
 class _PickerSheet extends StatefulWidget {
   final String title;
   final List<_PickerItem> items;
   final Future<int> Function(String name) onAddNew;
   final Future<void> Function(int id, String newName)? onEdit;
-  final Future<bool> Function(int id)? onDelete;
+  final Future<String?> Function(int id)? onDelete;
+  final Future<List<_PickerItem>> Function()? reloadItems;
+  final String deleteTitle;
+  final String deleteMessage;
   const _PickerSheet({
     required this.title,
     required this.items,
     required this.onAddNew,
     this.onEdit,
     this.onDelete,
+    this.reloadItems,
+    this.deleteTitle = 'حذف',
+    this.deleteMessage = 'آیا از حذف مطمئن هستید؟',
   });
 
   @override
@@ -542,6 +583,24 @@ class _PickerSheet extends StatefulWidget {
 
 class _PickerSheetState extends State<_PickerSheet> {
   final _newCtrl = TextEditingController();
+  late List<_PickerItem> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = widget.items;
+  }
+
+  Future<void> _refresh() async {
+    final reload = widget.reloadItems;
+    if (reload == null) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final fresh = await reload();
+    if (!mounted) return;
+    setState(() => _items = fresh);
+  }
 
   Future<void> _showItemActions(BuildContext context, _PickerItem item) async {
     final action = await showModalBottomSheet<String>(
@@ -578,14 +637,14 @@ class _PickerSheetState extends State<_PickerSheet> {
       );
       if (newName != null && newName.isNotEmpty) {
         await widget.onEdit!(item.id!, newName);
-        if (context.mounted) setState(() {});
+        await _refresh();
       }
     } else if (action == 'delete' && widget.onDelete != null) {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('حذف برند'),
-          content: const Text('آیا از حذف این برند مطمئن هستید؟'),
+          title: Text(widget.deleteTitle),
+          content: Text(widget.deleteMessage),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
             TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف', style: TextStyle(color: Colors.red))),
@@ -593,8 +652,23 @@ class _PickerSheetState extends State<_PickerSheet> {
         ),
       );
       if (confirm == true) {
-        await widget.onDelete!(item.id!);
-        if (context.mounted) Navigator.pop(context, null);
+        final error = await widget.onDelete!(item.id!);
+        if (!context.mounted) return;
+        if (error != null) {
+          await showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+              content: Text(error),
+              actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('باشه'))],
+            ),
+          );
+          return;
+        }
+        if (widget.reloadItems != null) {
+          await _refresh();
+        } else {
+          Navigator.pop(context, null);
+        }
       }
     }
   }
@@ -630,8 +704,9 @@ class _PickerSheetState extends State<_PickerSheet> {
           Expanded(
             child: ListView.builder(
               controller: scrollController,
+              itemCount: _items.length,
               itemBuilder: (context, i) {
-                final item = widget.items[i];
+                final item = _items[i];
                 final canManage = item.id != null && (widget.onEdit != null || widget.onDelete != null);
                 return ListTile(
                   title: Text(item.label),
