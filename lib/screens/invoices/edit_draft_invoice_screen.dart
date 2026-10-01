@@ -104,7 +104,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
 
   Future<String> _buildVehicleLabel(Vehicle v) async {
     final refRepo = VehicleReferenceRepository();
-    final brands = await refRepo.getAllBrands();
+    final brands = await refRepo.getAllBrands(includeDeleted: true);
     final brandNames = {for (final b in brands) b.id!: b.name};
     String modelName = '';
     if (v.brandId != null && v.modelId != null) {
@@ -115,7 +115,6 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     final parts = <String>[
       if (v.brandId != null) brandNames[v.brandId] ?? '',
       modelName,
-      if ((v.plateNumber ?? '').isNotEmpty) v.plateNumber!,
     ].where((p) => p.isNotEmpty).toList();
     return parts.isEmpty ? 'خودروی بدون مشخصات' : parts.join(' - ');
   }
