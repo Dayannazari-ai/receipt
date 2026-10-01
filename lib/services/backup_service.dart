@@ -230,6 +230,21 @@ class BackupService {
   /// تبدیل ایمن یک مقدار به int یا null (برای عبور دادن id از JSON که ممکن
   /// است به‌صورت num دیکد شده باشد).
   int? _asIntOrNull(dynamic v) => v == null ? null : (v as num).toInt();
+  Future<int?> _findMatchingVehicleId(
+      DatabaseExecutor txn, int customerId, Map<String, dynamic> v) async {
+    final brandId = _asIntOrNull(v['brand_id']);
+    final modelId = _asIntOrNull(v['model_id']);
+    final plate = (v['plate_number'] as String?)?.trim() ?? '';
+    final notes = (v['notes'] as String?)?.trim() ?? '';
+    final rows = await txn.query(
+      'vehicles',
+      where: "customer_id = ? AND COALESCE(brand_id, -1) = ? AND COALESCE(model_id, -1) = ? "
+          "AND TRIM(COALESCE(plate_number, '')) = ? AND TRIM(COALESCE(notes, '')) = ?",
+      whereArgs: [customerId, brandId ?? -1, modelId ?? -1, plate, notes],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first['id'] as int;
+  }
 
   /// insert یک رکورد خام (Map از فایل Backup) در یک جدول، با حذف ستون id
   /// قدیمی (چون id جدید توسط SQLite تولید می‌شود) و اعمال Mapping روی
@@ -293,16 +308,8 @@ class BackupService {
         report.notes.add('یک خودرو به دلیل نبود مشتری متناظر، نادیده گرفته شد.');
         continue;
       }
-      final plate = (v['plate_number'] as String?)?.trim() ?? '';
-
-      bool matched = false;
-      if (plate.isNotEmpty) {
-        final rows = await txn.query('vehicles',
-            where: 'customer_id = ? AND plate_number = ?', whereArgs: [newCustomerId, plate], limit: 1);
-        if (rows.isNotEmpty) matched = true;
-      }
-
-      if (matched) {
+      final matchedVehicleId = await _findMatchingVehicleId(txn, newCustomerId, v);
+      if (matchedVehicleId != null) {
         report.vehiclesMatched++;
       } else {
         await _insertRaw(txn, 'vehicles', v, fkMappings: {'customer_id': customerIdMap});
@@ -604,11 +611,8 @@ class BackupService {
       final oldCustomerId = _asIntOrNull(v['customer_id']);
       final newCustomerId = oldCustomerId != null ? customerIdMap[oldCustomerId] : null;
       if (newCustomerId == null) continue;
-      final plate = (v['plate_number'] as String?)?.trim() ?? '';
-      if (plate.isEmpty) continue;
-      final rows = await txn.query('vehicles',
-          where: 'customer_id = ? AND plate_number = ?', whereArgs: [newCustomerId, plate], limit: 1);
-      if (rows.isNotEmpty) map[oldId] = rows.first['id'] as int;
+      final matchedId = await _findMatchingVehicleId(txn, newCustomerId, v);
+      if (matchedId != null) map[oldId] = matchedId;
     }
     return map;
   }
