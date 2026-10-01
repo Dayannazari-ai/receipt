@@ -225,19 +225,19 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
 
   Future<void> _addItemManually() async {
     if (_type.isServiceType) {
-      final result = await showModalBottomSheet<InvoiceCartLine>(
+      final result = await showModalBottomSheet<List<InvoiceCartLine>>(
         context: context,
         isScrollControlled: true,
         builder: (_) => _DraftServicePickerSheet(invoiceType: _type),
       );
-      if (result != null) setState(() => _lines.add(result));
+      if (result != null && result.isNotEmpty) setState(() => _lines.addAll(result));
     } else {
-      final result = await showModalBottomSheet<InvoiceCartLine>(
+      final result = await showModalBottomSheet<List<InvoiceCartLine>>(
         context: context,
         isScrollControlled: true,
         builder: (_) => const _DraftProductPickerSheet(),
       );
-      if (result != null) setState(() => _lines.add(result));
+      if (result != null && result.isNotEmpty) setState(() => _lines.addAll(result));
     }
   }
 
@@ -419,7 +419,6 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             Customer(name: _nameCtrl.text.trim(), mobile: _mobileCtrl.text.trim()));
       }
 
-      // اگر خودرو انتخاب شده ولی متعلق به مشتریِ نهایی نیست، رها می‌شود.
       final vehicleId = (_selectedVehicle != null && _selectedVehicle!.customerId == customerId)
           ? _selectedVehicle!.id
           : null;
@@ -719,7 +718,9 @@ class _DraftCustomerPickerSheetState extends State<_DraftCustomerPickerSheet> {
 }
 
 // ---------------- Service picker (کپی مستقل) ----------------
-
+//
+// ساختار قبلی (تکی) کاملاً دست‌نخورده؛ فقط حالت انتخاب گروهی اضافه شده،
+// همان الگوی _ServicePickerSheet در receipt_screen.dart.
 class _DraftServicePickerSheet extends StatefulWidget {
   final InvoiceType invoiceType;
   const _DraftServicePickerSheet({required this.invoiceType});
@@ -742,6 +743,9 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
   ServiceItem? _selected;
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
+
+  bool _multiSelectMode = false;
+  final Set<int> _multiSelectedIds = {};
 
   @override
   void initState() {
@@ -815,6 +819,39 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
     });
   }
 
+  void _toggleMultiSelectMode() {
+    setState(() {
+      _multiSelectMode = !_multiSelectMode;
+      _multiSelectedIds.clear();
+    });
+  }
+
+  void _toggleChecked(int id, bool? checked) {
+    setState(() {
+      if (checked == true) {
+        _multiSelectedIds.add(id);
+      } else {
+        _multiSelectedIds.remove(id);
+      }
+    });
+  }
+
+  void _confirmMultiSelect() {
+    if (_multiSelectedIds.isEmpty) return;
+    final chosen = _results.where((s) => _multiSelectedIds.contains(s.id)).toList();
+    final lines = chosen
+        .map((s) => InvoiceCartLine(
+              itemType: InvoiceItemType.service,
+              serviceId: s.id,
+              description: s.name,
+              itemCode: s.code,
+              quantity: 1,
+              unitPrice: s.price,
+            ))
+        .toList();
+    Navigator.pop(context, lines);
+  }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -824,8 +861,15 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
         padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
         child: _selected == null
             ? Column(children: [
-                const Text('افزودن خدمت', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('افزودن خدمت', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  TextButton.icon(
+                    icon: Icon(_multiSelectMode ? Icons.checklist : Icons.checklist_outlined, size: 18),
+                    label: Text(_multiSelectMode ? 'لغو انتخاب گروهی' : 'انتخاب گروهی'),
+                    onPressed: _toggleMultiSelectMode,
+                  ),
+                ]),
+                const SizedBox(height: 4),
                 TextField(
                     controller: _searchCtrl,
                     decoration: const InputDecoration(hintText: 'جستجوی خدمت...', prefixIcon: Icon(Icons.search)),
@@ -861,6 +905,14 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
                     ),
                   ),
                 ]),
+                if (_multiSelectMode) ...[
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text('${_multiSelectedIds.length} مورد انتخاب شده',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Expanded(
                   child: _results.isEmpty
@@ -870,6 +922,15 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
                           itemCount: _results.length,
                           itemBuilder: (context, i) {
                             final s = _results[i];
+                            if (_multiSelectMode) {
+                              return CheckboxListTile(
+                                value: _multiSelectedIds.contains(s.id),
+                                onChanged: (v) => _toggleChecked(s.id!, v),
+                                title: Text(s.name),
+                                subtitle: Text(_brandModelLabel(s)),
+                                secondary: Text(CurrencyFormatter.formatPlain(s.price)),
+                              );
+                            }
                             return ListTile(
                               title: Text(s.name),
                               subtitle: Text(_brandModelLabel(s)),
@@ -879,6 +940,13 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
                           },
                         ),
                 ),
+                if (_multiSelectMode) ...[
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    onPressed: _multiSelectedIds.isEmpty ? null : _confirmMultiSelect,
+                    child: const Text('تأیید و افزودن به فاکتور'),
+                  ),
+                ],
               ])
             : Column(mainAxisSize: MainAxisSize.min, children: [
                 ListTile(
@@ -903,13 +971,15 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
                     final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text)) ?? _selected!.price;
                     Navigator.pop(
                         context,
-                        InvoiceCartLine(
-                            itemType: InvoiceItemType.service,
-                            serviceId: _selected!.id,
-                            description: _selected!.name,
-                            itemCode: _selected!.code,
-                            quantity: qty,
-                            unitPrice: price));
+                        [
+                          InvoiceCartLine(
+                              itemType: InvoiceItemType.service,
+                              serviceId: _selected!.id,
+                              description: _selected!.name,
+                              itemCode: _selected!.code,
+                              quantity: qty,
+                              unitPrice: price)
+                        ]);
                   },
                   child: const Text('افزودن به فاکتور'),
                 ),
@@ -919,6 +989,9 @@ class _DraftServicePickerSheetState extends State<_DraftServicePickerSheet> {
   }
 }
 
+// ---------------- Product picker (کپی مستقل) ----------------
+//
+// ساختار قبلی (تکی) کاملاً دست‌نخورده؛ فقط حالت انتخاب گروهی اضافه شده.
 class _DraftProductPickerSheet extends StatefulWidget {
   const _DraftProductPickerSheet();
   @override
@@ -932,6 +1005,9 @@ class _DraftProductPickerSheetState extends State<_DraftProductPickerSheet> {
   Product? _selected;
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
+
+  bool _multiSelectMode = false;
+  final Set<int> _multiSelectedIds = {};
 
   @override
   void initState() {
@@ -951,6 +1027,39 @@ class _DraftProductPickerSheetState extends State<_DraftProductPickerSheet> {
     });
   }
 
+  void _toggleMultiSelectMode() {
+    setState(() {
+      _multiSelectMode = !_multiSelectMode;
+      _multiSelectedIds.clear();
+    });
+  }
+
+  void _toggleChecked(int id, bool? checked) {
+    setState(() {
+      if (checked == true) {
+        _multiSelectedIds.add(id);
+      } else {
+        _multiSelectedIds.remove(id);
+      }
+    });
+  }
+
+  void _confirmMultiSelect() {
+    if (_multiSelectedIds.isEmpty) return;
+    final chosen = _results.where((p) => _multiSelectedIds.contains(p.id)).toList();
+    final lines = chosen
+        .map((p) => InvoiceCartLine(
+              itemType: InvoiceItemType.product,
+              productId: p.id,
+              description: p.name,
+              itemCode: p.code,
+              quantity: 1,
+              unitPrice: p.sellPrice,
+            ))
+        .toList();
+    Navigator.pop(context, lines);
+  }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -960,12 +1069,27 @@ class _DraftProductPickerSheetState extends State<_DraftProductPickerSheet> {
         padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
         child: _selected == null
             ? Column(children: [
-                const Text('افزودن کالا', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('افزودن کالا', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  TextButton.icon(
+                    icon: Icon(_multiSelectMode ? Icons.checklist : Icons.checklist_outlined, size: 18),
+                    label: Text(_multiSelectMode ? 'لغو انتخاب گروهی' : 'انتخاب گروهی'),
+                    onPressed: _toggleMultiSelectMode,
+                  ),
+                ]),
+                const SizedBox(height: 4),
                 TextField(
                     controller: _searchCtrl,
                     decoration: const InputDecoration(hintText: 'جستجوی کالا...', prefixIcon: Icon(Icons.search)),
                     onChanged: _search),
+                if (_multiSelectMode) ...[
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text('${_multiSelectedIds.length} مورد انتخاب شده',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Expanded(
                   child: ListView.builder(
@@ -973,6 +1097,15 @@ class _DraftProductPickerSheetState extends State<_DraftProductPickerSheet> {
                     itemCount: _results.length,
                     itemBuilder: (context, i) {
                       final p = _results[i];
+                      if (_multiSelectMode) {
+                        return CheckboxListTile(
+                          value: _multiSelectedIds.contains(p.id),
+                          onChanged: (v) => _toggleChecked(p.id!, v),
+                          title: Text(p.name),
+                          subtitle: Text('موجودی: ${p.stock}'),
+                          secondary: Text(CurrencyFormatter.formatPlain(p.sellPrice)),
+                        );
+                      }
                       return ListTile(
                         title: Text(p.name),
                         subtitle: Text('موجودی: ${p.stock}'),
@@ -982,6 +1115,13 @@ class _DraftProductPickerSheetState extends State<_DraftProductPickerSheet> {
                     },
                   ),
                 ),
+                if (_multiSelectMode) ...[
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    onPressed: _multiSelectedIds.isEmpty ? null : _confirmMultiSelect,
+                    child: const Text('تأیید و افزودن به فاکتور'),
+                  ),
+                ],
               ])
             : Column(mainAxisSize: MainAxisSize.min, children: [
                 ListTile(
@@ -1011,13 +1151,15 @@ class _DraftProductPickerSheetState extends State<_DraftProductPickerSheet> {
                     }
                     Navigator.pop(
                         context,
-                        InvoiceCartLine(
-                            itemType: InvoiceItemType.product,
-                            productId: _selected!.id,
-                            description: _selected!.name,
-                            itemCode: _selected!.code,
-                            quantity: qty,
-                            unitPrice: price));
+                        [
+                          InvoiceCartLine(
+                              itemType: InvoiceItemType.product,
+                              productId: _selected!.id,
+                              description: _selected!.name,
+                              itemCode: _selected!.code,
+                              quantity: qty,
+                              unitPrice: price)
+                        ]);
                   },
                   child: const Text('افزودن به فاکتور'),
                 ),
