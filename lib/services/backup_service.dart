@@ -272,7 +272,7 @@ class BackupService {
   }
 
   /// بکاپ کامل: همه‌ی بخش‌های بالا + همه‌ی برندها و مدل‌ها + تنظیمات.
-  Future<File> exportFull() async {
+  Future<BackupEnvelope> _buildFullEnvelope() async {
     final db = await _db.database;
     final customers = await db.query('customers');
     final vehicles = await db.query('vehicles');
@@ -321,6 +321,11 @@ class BackupService {
       recordCounts: counts,
       data: data,
     );
+    return envelope;
+  }
+
+  Future<File> exportFull() async {
+    final envelope = await _buildFullEnvelope();
     return _writeEnvelopeToFile(envelope, _fileNameFor(BackupType.full));
   }
 
@@ -355,9 +360,21 @@ class BackupService {
     final file = File(path);
     if (!await file.exists()) throw StateError('فایل یافت نشد');
     final content = await file.readAsString();
-    final decoded = jsonDecode(content);
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(content);
+    } on FormatException {
+      throw StateError('فایل Backup خراب است یا قالب آن معتبر نیست');
+    }
     if (decoded is! Map<String, dynamic>) {
       throw StateError('فایل Backup معتبر نیست');
+    }
+    final typeKey = decoded['backupType']?.toString();
+    if (typeKey == null || !BackupType.values.any((t) => t.key == typeKey)) {
+      throw StateError('نوع Backup در فایل مشخص نیست');
+    }
+    if (decoded['data'] is! Map) {
+      throw StateError('محتوای Backup خراب است');
     }
     return BackupEnvelope.fromJson(decoded);
   }
@@ -860,9 +877,7 @@ class BackupService {
   /// نکته: در حالت افزودن برای نوع «کامل»، مقادیر تنظیمات/قالب/مهر تغییر
   /// نمی‌کنند (فقط شماره کارت/شبای جدید اضافه می‌شود). برای نوع «تنظیمات» این
   /// بازنویسی انجام می‌شود.
-  Future<RestoreReport> restoreMerge(BackupEnvelope envelope) async {
-    final db = await _db.database;
-    final report = RestoreReport();
+  Future<void> _runMerge(Database db, BackupEnvelope envelope, RestoreReport report) async {
     final data = envelope.data;
 
     await db.transaction((txn) async {
@@ -950,10 +965,6 @@ class BackupService {
       }
     });
 
-    if (envelope.backupType == BackupType.settings) {
-      await _applySettingsExtras(data, report);
-    }
-    return report;
   }
 
   // ==================== نقطه‌ی ورود اصلی: Restore با حالت Replace ====================
@@ -963,17 +974,7 @@ class BackupService {
   /// هیچ تغییری اعمال نمی‌شود. شناسه‌های اصلی رکوردها حفظ می‌شوند و بررسی
   /// کلید خارجی تا لحظه‌ی Commit به تعویق می‌افتد؛ اگر در پایان رکوردی به
   /// داده‌ی ناموجود اشاره کند، کل عملیات لغو می‌شود.
-  Future<RestoreReport> restoreReplace(BackupEnvelope envelope) async {
-    // Backup ایمنی قبل از جایگزینی، خارج از تراکنش اصلی (نام فایل شامل
-    // ساعت است و روی بکاپ‌های قبلی نمی‌نویسد).
-    try {
-      await exportByType(envelope.backupType);
-    } catch (_) {
-      // (مرحله‌ی بعدی: شکست بکاپ ایمنی باید Replace را متوقف کند.)
-    }
-
-    final db = await _db.database;
-    final report = RestoreReport();
+  Future<void> _runReplace(Database db, BackupEnvelope envelope, RestoreReport report) async {
     final data = envelope.data;
 
     try {
@@ -1126,10 +1127,6 @@ class BackupService {
       rethrow;
     }
 
-    if (envelope.backupType == BackupType.full) {
-      await _applySettingsExtras(data, report);
-    }
-    return report;
   }
 
   /// حرکت‌های موجودی که کالایشان دیگر وجود ندارد (بعد از جایگزینی محصولات).
@@ -1138,10 +1135,306 @@ class BackupService {
     if (n > 0) report.notes.add('$n حرکت موجودی مربوط به کالاهای حذف‌شده پاک شد.');
   }
 
-  Future<RestoreReport> restore(BackupEnvelope envelope, RestoreMode mode) {
-    // بازیابی تنظیمات حالت افزودن/جایگزینی ندارد و همیشه یک رفتار دارد.
-    if (envelope.backupType == BackupType.settings) return restoreMerge(envelope);
-    return mode == RestoreMode.merge ? restoreMerge(envelope) : restoreReplace(envelope);
+  // ==================== اعتبارسنجی، Snapshot اضطراری، Restore آزمایشی ====================
+
+  static const Map<BackupType, List<String>> _requiredKeys = {
+    BackupType.customers: ['customers', 'vehicles'],
+    BackupType.products: ['products'],
+    BackupType.services: ['services', 'service_categories', 'service_price_history'],
+    BackupType.invoices: ['invoices', 'invoice_items', 'side_costs'],
+    BackupType.settings: ['app_settings'],
+    BackupType.full: [
+      'customers',
+      'vehicles',
+      'products',
+      'services',
+      'service_categories',
+      'service_price_history',
+      'invoices',
+      'invoice_items',
+      'side_costs',
+    ],
+  };
+
+  /// نام فارسی هر بخش داخل Backup، برای پیام‌ها و Preview.
+  static String sectionLabel(String key) {
+    const labels = {
+      'customers': 'مشتریان',
+      'vehicles': 'خودروها',
+      'vehicle_brands': 'برندها',
+      'vehicle_models': 'مدل‌ها',
+      'products': 'محصولات',
+      'services': 'خدمات',
+      'service_categories': 'دسته‌بندی خدمات',
+      'service_price_history': 'سوابق قیمت خدمات',
+      'invoices': 'فاکتورها',
+      'invoice_items': 'اقلام فاکتور',
+      'side_costs': 'هزینه‌های جانبی',
+      'payment_accounts': 'شماره کارت/شبا',
+      'app_settings': 'تنظیمات برنامه',
+      'invoice_layout': 'قالب فاکتور',
+      'stamp_image': 'عکس مهر/امضا',
+    };
+    return labels[key] ?? key;
+  }
+
+  /// اعتبارسنجی فایل Backup قبل از هر Restore: نسخه، تطابق پسوند با نوع،
+  /// وجود بخش‌های ضروری هر نوع، و تطابق تعداد رکوردها با محتوای واقعی فایل
+  /// (برای تشخیص فایل ناقص یا خراب).
+  BackupValidation validateEnvelope(BackupEnvelope env, {String? path}) {
+    final errors = <String>[];
+    final warnings = <String>[];
+
+    if (env.backupVersion > BackupEnvelope.currentVersion) {
+      errors.add('این Backup با نسخه‌ی جدیدتری از برنامه ساخته شده؛ ابتدا برنامه را به‌روزرسانی کنید.');
+    }
+    if (env.appDbVersion > DatabaseHelper.dbVersion) {
+      errors.add('ساختار دیتابیس این Backup جدیدتر از برنامه‌ی فعلی است؛ ابتدا برنامه را به‌روزرسانی کنید.');
+    }
+    if (env.backupVersion < BackupEnvelope.currentVersion) {
+      warnings.add('این Backup با نسخه‌ی قدیمی‌تری ساخته شده و ممکن است برند/مدل، تنظیمات و قالب فاکتور نداشته باشد.');
+    }
+
+    if (path != null) {
+      final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
+      for (final t in BackupType.values) {
+        if (t.fileExtension == ext && t != env.backupType) {
+          errors.add('پسوند فایل (${t.label}) با نوع واقعی داخل آن (${env.backupType.label}) مطابقت ندارد.');
+        }
+      }
+    }
+
+    for (final key in _requiredKeys[env.backupType] ?? const <String>[]) {
+      final v = env.data[key];
+      final ok = key == 'app_settings' ? v is Map : v is List;
+      if (!ok) errors.add('بخش «${sectionLabel(key)}» در فایل نیست یا خراب است.');
+    }
+
+    env.recordCounts.forEach((key, count) {
+      if (key == 'invoice_layout' || key == 'stamp_image') {
+        if (count > 0 && !env.data.containsKey(key)) {
+          errors.add('بخش «${sectionLabel(key)}» در فایل نیست.');
+        }
+        return;
+      }
+      final v = env.data[key];
+      final actual = v is List ? v.length : (v is Map ? v.length : null);
+      if (actual == null) {
+        if (count > 0) errors.add('بخش «${sectionLabel(key)}» در فایل نیست.');
+      } else if (actual != count) {
+        errors.add('تعداد رکوردهای «${sectionLabel(key)}» با اطلاعات فایل نمی‌خواند (فایل ناقص یا خراب است).');
+      }
+    });
+
+    return BackupValidation(errors: errors, warnings: warnings);
+  }
+
+  /// Backup کامل اضطراری از وضعیت فعلی، قبل از هر Restore. ابتدا در فایل
+  /// موقت نوشته و دوباره خوانده و اعتبارسنجی می‌شود؛ فقط بعد از موفقیت به
+  /// نام نهایی منتقل می‌شود. اگر شکست بخورد، خطا پرتاب می‌شود و Restore
+  /// نباید ادامه پیدا کند. فقط ۱۰ Snapshot آخر نگه داشته می‌شود.
+  Future<File> createPreRestoreSnapshot() async {
+    final envelope = await _buildFullEnvelope();
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory(p.join(docs.path, 'pre_restore_snapshots'));
+    if (!await dir.exists()) await dir.create(recursive: true);
+
+    String two(int n) => n.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final name =
+        'PreRestore_${now.year}-${two(now.month)}-${two(now.day)}_${two(now.hour)}-${two(now.minute)}-${two(now.second)}.${BackupType.full.fileExtension}';
+    final tmp = File(p.join(dir.path, '$name.tmp'));
+    final finalFile = File(p.join(dir.path, name));
+
+    try {
+      await tmp.writeAsString(jsonEncode(envelope.toJson()), flush: true);
+      final check = await readBackupFile(tmp.path);
+      final validation = validateEnvelope(check);
+      if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+      await tmp.rename(finalFile.path);
+    } catch (e) {
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      throw StateError('تهیه‌ی Backup اضطراری ناموفق بود، پس Restore انجام نشد: $e');
+    }
+
+    try {
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.${BackupType.full.fileExtension}'))
+          .toList()
+        ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      for (final f in files.skip(10)) {
+        try {
+          await f.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    return finalFile;
+  }
+
+  /// شمارنده‌ی مشکلات ساختاری دیتابیس. قبل و بعد از Restore گرفته و فقط
+  /// «افزایش» مشکلات گزارش می‌شود تا مشکلات قدیمیِ خود کاربر مانع نشود.
+  Future<Map<String, int>> _integrityCounts(DatabaseExecutor db) async {
+    Future<int> count(String sql) async => Sqflite.firstIntValue(await db.rawQuery(sql)) ?? 0;
+    final fk = await db.rawQuery('PRAGMA foreign_key_check');
+    return {
+      'ارجاع نامعتبر بین جدول‌ها (مثلاً خودرو یا فاکتور بدون مشتری)': fk.length,
+      'خودرو با مدلی که متعلق به برندش نیست': await count(
+          'SELECT COUNT(*) FROM vehicles v JOIN vehicle_models m ON m.id = v.model_id '
+          'WHERE v.brand_id IS NOT NULL AND m.brand_id != v.brand_id'),
+      'خدمت با مدلی که متعلق به برندش نیست': await count(
+          'SELECT COUNT(*) FROM services s JOIN vehicle_models m ON m.id = s.model_id '
+          'WHERE s.brand_id IS NOT NULL AND m.brand_id != s.brand_id'),
+      'قلم فاکتور بدون فاکتور':
+          await count('SELECT COUNT(*) FROM invoice_items WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
+      'هزینه‌ی جانبی بدون فاکتور':
+          await count('SELECT COUNT(*) FROM side_costs WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
+    };
+  }
+
+  List<String> _newIssues(Map<String, int> before, Map<String, int> after) {
+    final out = <String>[];
+    after.forEach((label, n) {
+      final b = before[label] ?? 0;
+      if (n > b) out.add('$label: ${n - b} مورد جدید');
+    });
+    return out;
+  }
+
+  Future<bool> _integrityOk(DatabaseExecutor db) async {
+    final rows = await db.rawQuery('PRAGMA integrity_check');
+    return rows.length == 1 && rows.first.values.first.toString().toLowerCase() == 'ok';
+  }
+
+  /// در حالت جایگزینی، تعداد رکوردهای هر جدولِ جایگزین‌شده باید دقیقاً برابر
+  /// تعداد داخل Backup باشد.
+  Future<List<String>> _countIssues(DatabaseExecutor db, BackupEnvelope env) async {
+    final tables = <String>[];
+    switch (env.backupType) {
+      case BackupType.customers:
+        tables.addAll(['customers', 'vehicles']);
+        break;
+      case BackupType.products:
+        tables.add('products');
+        break;
+      case BackupType.services:
+        tables.addAll(['services', 'service_categories', 'service_price_history']);
+        break;
+      case BackupType.invoices:
+        tables.addAll(['invoices', 'invoice_items', 'side_costs']);
+        break;
+      case BackupType.settings:
+        break;
+      case BackupType.full:
+        tables.addAll([
+          'customers',
+          'vehicles',
+          'products',
+          'services',
+          'service_categories',
+          'service_price_history',
+          'invoices',
+          'invoice_items',
+          'side_costs',
+        ]);
+        if (env.data['vehicle_brands'] is List) tables.addAll(['vehicle_brands', 'vehicle_models']);
+        if (env.data['payment_accounts'] is List) tables.add('payment_accounts');
+        break;
+    }
+    final issues = <String>[];
+    for (final t in tables) {
+      final expected = env.recordCounts[t];
+      if (expected == null) continue;
+      final actual = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
+      if (actual != expected) {
+        issues.add('تعداد «${sectionLabel(t)}» بعد از بازیابی ($actual) با Backup ($expected) برابر نیست.');
+      }
+    }
+    return issues;
+  }
+
+  Future<RestoreReport> _execute(Database db, BackupEnvelope env, RestoreMode mode,
+      {required bool applyExtras}) async {
+    final report = RestoreReport();
+    final isSettings = env.backupType == BackupType.settings;
+    final replace = !isSettings && mode == RestoreMode.replace;
+    if (replace) {
+      await _runReplace(db, env, report);
+    } else {
+      await _runMerge(db, env, report);
+    }
+    if (applyExtras && (isSettings || (replace && env.backupType == BackupType.full))) {
+      await _applySettingsExtras(env.data, report);
+    }
+    return report;
+  }
+
+  /// Restore آزمایشی روی یک کپی ایزوله از دیتابیس فعلی (فایل موقت). هیچ
+  /// تغییری روی اطلاعات واقعی ایجاد نمی‌کند. مشکلات پیداشده در
+  /// report.issues می‌آید؛ اگر خالی نبود، Restore واقعی نباید انجام شود.
+  Future<RestoreReport> dryRun(BackupEnvelope env, RestoreMode mode) async {
+    await _db.database;
+    final tmpDir = await getTemporaryDirectory();
+    final tmpPath = p.join(tmpDir.path, 'restore_dryrun_${DateTime.now().millisecondsSinceEpoch}.db');
+    await File(await _db.getDbFilePath()).copy(tmpPath);
+    Database? tmpDb;
+    try {
+      tmpDb = await openDatabase(tmpPath, onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'));
+      final before = await _integrityCounts(tmpDb);
+      final report = await _execute(tmpDb, env, mode, applyExtras: false);
+      report.issues.addAll(_newIssues(before, await _integrityCounts(tmpDb)));
+      final isReplace = env.backupType != BackupType.settings && mode == RestoreMode.replace;
+      if (isReplace) report.issues.addAll(await _countIssues(tmpDb, env));
+      if (!await _integrityOk(tmpDb)) report.issues.add('بررسی سلامت دیتابیس در Restore آزمایشی خطا داد.');
+      return report;
+    } finally {
+      try {
+        await tmpDb?.close();
+      } catch (_) {}
+      for (final suffix in ['', '-journal', '-wal', '-shm']) {
+        try {
+          final f = File('$tmpPath$suffix');
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// Restore واقعی. همیشه ابتدا اعتبارسنجی می‌شود و قبل از هر تغییر یک
+  /// Snapshot اضطراری وجود دارد (اگر [snapshot] داده نشود همین‌جا ساخته
+  /// می‌شود و شکستش Restore را متوقف می‌کند). بعد از Restore، اعتبارسنجی
+  /// خودکار انجام و مشکلات در report.issues گزارش می‌شود.
+  /// بازیابی تنظیمات حالت افزودن/جایگزینی ندارد و همیشه یک رفتار دارد.
+  Future<RestoreReport> restore(BackupEnvelope envelope, RestoreMode mode, {File? snapshot}) async {
+    final validation = validateEnvelope(envelope);
+    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+
+    final snap = snapshot ?? await createPreRestoreSnapshot();
+    final db = await _db.database;
+    final before = await _integrityCounts(db);
+
+    final report = await _execute(db, envelope, mode, applyExtras: true);
+    report.snapshotPath = snap.path;
+
+    report.issues.addAll(_newIssues(before, await _integrityCounts(db)));
+    final isReplace = envelope.backupType != BackupType.settings && mode == RestoreMode.replace;
+    if (isReplace) report.issues.addAll(await _countIssues(db, envelope));
+    if (!await _integrityOk(db)) report.issues.add('بررسی سلامت فایل دیتابیس خطا داد.');
+    return report;
+  }
+
+  /// برگشت به وضعیت قبل از Restore با استفاده از Snapshot اضطراری (که یک
+  /// Backup کامل است و با جایگزینی کامل بازیابی می‌شود).
+  Future<RestoreReport> rollbackToSnapshot(File snapshot) async {
+    final env = await readBackupFile(snapshot.path);
+    final validation = validateEnvelope(env);
+    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+    final db = await _db.database;
+    return _execute(db, env, RestoreMode.replace, applyExtras: true);
   }
 
   // ==================== به‌روزرسانی یک Backup موجود ====================
