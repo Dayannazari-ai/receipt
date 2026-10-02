@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../main.dart';
 import '../../models/backup_models.dart';
+import '../../repositories/settings_repository.dart';
 import '../../services/backup_service.dart';
 import '../../utils/persian_date.dart';
 
@@ -47,17 +49,33 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     }
 
     if (!mounted) return;
-    final mode = await _showRestoreSummaryDialog(envelope);
-    if (mode == null) return;
 
-    if (mode == RestoreMode.replace) {
-      final confirmed = await _confirmReplace(envelope);
-      if (confirmed != true) return;
+    RestoreMode mode;
+    if (envelope.backupType == BackupType.settings) {
+      // بازیابی تنظیمات حالت افزودن/جایگزینی ندارد.
+      final ok = await _showSettingsRestoreDialog(envelope);
+      if (ok != true) return;
+      mode = RestoreMode.merge;
+    } else {
+      final picked = await _showRestoreSummaryDialog(envelope);
+      if (picked == null) return;
+      mode = picked;
+      if (mode == RestoreMode.replace) {
+        final confirmed = await _confirmReplace(envelope);
+        if (confirmed != true) return;
+      }
     }
 
     setState(() => _busy = true);
     try {
       final report = await _backupService.restore(envelope, mode);
+
+      // رنگ اصلی برنامه جزو تنظیمات است؛ بعد از بازیابی بلافاصله اعمال شود.
+      if (report.settingsRestored) {
+        final s = await SettingsRepository().getSettings();
+        if (mounted) ReceiptApp.of(context)?.updateColor(s.primaryColorHex);
+      }
+
       if (mounted) {
         await showDialog<void>(
           context: context,
@@ -75,22 +93,59 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     }
   }
 
-  Future<RestoreMode?> _showRestoreSummaryDialog(BackupEnvelope envelope) {
+  Widget _backupInfo(BackupEnvelope envelope) {
     final countsText = envelope.recordCounts.entries.map((e) => '${e.key}: ${e.value}').join('\n');
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('نوع: ${envelope.backupType.label}'),
+      const SizedBox(height: 4),
+      Text('تاریخ ایجاد: ${PersianDateUtil.formatDateTime(envelope.createdAt)}'),
+      const SizedBox(height: 4),
+      Text('آخرین به‌روزرسانی: ${PersianDateUtil.formatDateTime(envelope.updatedAt)}'),
+      const SizedBox(height: 10),
+      const Text('تعداد رکوردها:', style: TextStyle(fontWeight: FontWeight.bold)),
+      Text(countsText),
+    ]);
+  }
+
+  Future<bool?> _showSettingsRestoreDialog(BackupEnvelope envelope) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('بازیابی تنظیمات'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _backupInfo(envelope),
+            const SizedBox(height: 16),
+            const Text(
+              'فقط تنظیمات برنامه، قالب فاکتور و عکس مهر بازیابی می‌شوند و شماره کارت/شبای جدید اضافه می‌شود. '
+              'مشتریان، خودروها، محصولات، خدمات و فاکتورها تغییر نمی‌کنند. رمز عبور برنامه جزو Backup نیست.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('بازیابی تنظیمات')),
+        ],
+      ),
+    );
+  }
+
+  Future<RestoreMode?> _showRestoreSummaryDialog(BackupEnvelope envelope) {
     return showDialog<RestoreMode>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text('Backup ${envelope.backupType.label}'),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('نوع: ${envelope.backupType.label}'),
-            const SizedBox(height: 4),
-            Text('تاریخ ایجاد: ${PersianDateUtil.formatDateTime(envelope.createdAt)}'),
-            const SizedBox(height: 4),
-            Text('آخرین به‌روزرسانی: ${PersianDateUtil.formatDateTime(envelope.updatedAt)}'),
-            const SizedBox(height: 10),
-            const Text('تعداد رکوردها:', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text(countsText),
+            _backupInfo(envelope),
+            if (envelope.backupType == BackupType.full) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'در حالت «افزودن»، تنظیمات برنامه تغییر نمی‌کند. برای بازیابی تنظیمات از «جایگزینی کامل» یا از Backup تنظیمات استفاده کنید.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
             const SizedBox(height: 16),
             const Text('حالت بازیابی را انتخاب کنید:', style: TextStyle(fontWeight: FontWeight.bold)),
           ]),
@@ -178,6 +233,12 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
             icon: const Icon(Icons.receipt_long_outlined),
             label: const Text('پشتیبان فاکتورها'),
             onPressed: () => _doExport(BackupType.invoices),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.settings_backup_restore_outlined),
+            label: const Text('پشتیبان تنظیمات'),
+            onPressed: () => _doExport(BackupType.settings),
           ),
           const SizedBox(height: 8),
           ElevatedButton.icon(
