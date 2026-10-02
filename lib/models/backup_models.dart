@@ -155,6 +155,12 @@ class RestoreReport {
   bool stampRestored = false;
   final List<String> notes = [];
 
+  /// مسیر فایل Backup اضطراری که قبل از Restore گرفته شده است.
+  String? snapshotPath;
+
+  /// مشکلات پیداشده در اعتبارسنجی بعد از Restore (خالی = سالم).
+  final List<String> issues = [];
+
   String summary() {
     final b = StringBuffer();
     if (customersAdded > 0 || customersMatched > 0) {
@@ -190,4 +196,14 @@ class RestoreReport {
     }
     return b.toString().trim();
   }
+}
+
+
+/// نتیجه‌ی اعتبارسنجی یک فایل Backup قبل از Restore.
+/// [errors] مانع Restore هستند؛ [warnings] فقط به کاربر نشان داده می‌شوند.
+class BackupValidation {
+  final List<String> errors;
+  final List<String> warnings;
+  const BackupValidation({this.errors = const [], this.warnings = const []});
+  bool get isValid => errors.isEmpty;
 }
