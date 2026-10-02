@@ -1,10 +1,11 @@
 /// انواع Backup پشتیبانی‌شده. هر نوع در یک فایل JSON مستقل ذخیره می‌شود.
 enum BackupType {
-  customers, // مشتریان + خودروهای وابسته به آن‌ها
+  customers, // مشتریان + خودروهای وابسته (+ برند/مدل‌های ارجاع‌شده)
   products, // محصولات + سوابق (فعلاً بدون stock_movements)
-  services, // خدمات + دسته‌بندی‌ها + سوابق قیمت
+  services, // خدمات + دسته‌بندی‌ها + سوابق قیمت (+ برند/مدل‌های ارجاع‌شده)
   invoices, // فاکتورها + اقلام + هزینه‌های جانبی (شامل ارجاع مشتری/خودرو)
-  full, // همه‌ی بخش‌های بالا با هم
+  settings, // تنظیمات برنامه + حساب‌های پرداخت + قالب فاکتور + عکس مهر
+  full, // همه‌ی بخش‌های بالا + برندها و مدل‌ها
 }
 
 extension BackupTypeX on BackupType {
@@ -18,6 +19,8 @@ extension BackupTypeX on BackupType {
         return 'services';
       case BackupType.invoices:
         return 'invoices';
+      case BackupType.settings:
+        return 'settings';
       case BackupType.full:
         return 'full';
     }
@@ -34,6 +37,8 @@ extension BackupTypeX on BackupType {
         return 'خدمات';
       case BackupType.invoices:
         return 'فاکتورها';
+      case BackupType.settings:
+        return 'تنظیمات';
       case BackupType.full:
         return 'کامل';
     }
@@ -52,6 +57,8 @@ extension BackupTypeX on BackupType {
         return 'servicebackup';
       case BackupType.invoices:
         return 'invoicebackup';
+      case BackupType.settings:
+        return 'settingsbackup';
       case BackupType.full:
         return 'fullbackup';
     }
@@ -64,7 +71,10 @@ extension BackupTypeX on BackupType {
 
 /// ساختار کلی هر فایل Backup، مستقل از نوع محتوای داخلش.
 class BackupEnvelope {
-  static const int currentVersion = 1;
+  /// نسخه ۲: افزوده شدن برندها/مدل‌ها، حساب‌های پرداخت، تنظیمات، قالب فاکتور
+  /// و عکس مهر. فایل‌های نسخه ۱ همچنان خوانده می‌شوند (کلیدهای جدید خالی
+  /// فرض می‌شوند).
+  static const int currentVersion = 2;
 
   final BackupType backupType;
   final int backupVersion;
@@ -127,6 +137,10 @@ class RestoreReport {
   int customersMatched = 0;
   int vehiclesAdded = 0;
   int vehiclesMatched = 0;
+  int brandsAdded = 0;
+  int brandsMatched = 0;
+  int modelsAdded = 0;
+  int modelsMatched = 0;
   int productsAdded = 0;
   int productsMatched = 0;
   int servicesAdded = 0;
@@ -134,6 +148,11 @@ class RestoreReport {
   int invoicesAdded = 0;
   int invoicesSkippedDuplicate = 0;
   int invoicesRenumbered = 0;
+  int accountsAdded = 0;
+  int accountsMatched = 0;
+  bool settingsRestored = false;
+  bool layoutRestored = false;
+  bool stampRestored = false;
   final List<String> notes = [];
 
   String summary() {
@@ -143,6 +162,12 @@ class RestoreReport {
     }
     if (vehiclesAdded > 0 || vehiclesMatched > 0) {
       b.writeln('خودروها: $vehiclesAdded جدید، $vehiclesMatched قبلاً موجود');
+    }
+    if (brandsAdded > 0 || brandsMatched > 0) {
+      b.writeln('برندها: $brandsAdded جدید، $brandsMatched قبلاً موجود');
+    }
+    if (modelsAdded > 0 || modelsMatched > 0) {
+      b.writeln('مدل‌ها: $modelsAdded جدید، $modelsMatched قبلاً موجود');
     }
     if (productsAdded > 0 || productsMatched > 0) {
       b.writeln('محصولات: $productsAdded جدید، $productsMatched قبلاً موجود');
@@ -154,6 +179,12 @@ class RestoreReport {
       b.writeln('فاکتورها: $invoicesAdded جدید، $invoicesSkippedDuplicate تکراری (رد شد)'
           '${invoicesRenumbered > 0 ? '، $invoicesRenumbered با شماره‌ی جدید' : ''}');
     }
+    if (accountsAdded > 0 || accountsMatched > 0) {
+      b.writeln('شماره کارت/شبا: $accountsAdded جدید، $accountsMatched قبلاً موجود');
+    }
+    if (settingsRestored) b.writeln('تنظیمات برنامه: بازیابی شد');
+    if (layoutRestored) b.writeln('قالب فاکتور: بازیابی شد');
+    if (stampRestored) b.writeln('عکس مهر/امضا: بازیابی شد');
     for (final n in notes) {
       b.writeln(n);
     }
