@@ -232,7 +232,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
               : _categories.isEmpty
                   ? const Center(child: Text('ابتدا یک دسته‌بندی ایجاد کنید'))
                   : ListView(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 88),
                       children: _categories.map((cat) {
                         final list = grouped[cat.id] ?? [];
                         if (list.isEmpty && (_searchCtrl.text.isNotEmpty || _filterBrandId != null)) {
@@ -257,6 +257,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                     ),
         ),
       ]),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.add),
         label: const Text('خدمت جدید'),
