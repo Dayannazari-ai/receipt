@@ -126,7 +126,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
               : _products.isEmpty
                   ? const Center(child: Text('کالایی یافت نشد'))
                   : ListView.builder(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
                       itemCount: _products.length,
                       itemBuilder: (context, i) {
                         final p = _products[i];
@@ -151,6 +151,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     ),
         ),
       ]),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.add),
         label: const Text('افزودن کالا'),
