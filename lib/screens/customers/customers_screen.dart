@@ -131,7 +131,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
               : _customers.isEmpty
                   ? Center(child: Text(_debtorsOnly ? 'مشتری بدهکاری ثبت نشده است' : 'مشتری ثبت نشده است'))
                   : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 88),
                       itemCount: _customers.length,
                       itemBuilder: (context, i) {
                         final c = _customers[i];
@@ -157,6 +157,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                     ),
         ),
       ]),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.add),
         label: const Text('افزودن مشتری'),
