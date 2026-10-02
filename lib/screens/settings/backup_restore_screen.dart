@@ -34,6 +34,16 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   }
 
   // ==================== Restore ====================
+  //
+  // مراحل ایمن: انتخاب فایل ← اعتبارسنجی ← Preview و انتخاب حالت ←
+  // Backup اضطراری از وضعیت فعلی ← Restore آزمایشی روی کپی ایزوله ←
+  // تأیید نهایی ← Restore واقعی (تراکنشی) ← اعتبارسنجی بعد از Restore
+  // (با امکان برگشت به Backup اضطراری).
+
+  Future<void> _applyThemeColorFromSettings() async {
+    final s = await SettingsRepository().getSettings();
+    if (mounted) ReceiptApp.of(context)?.updateColor(s.primaryColorHex);
+  }
 
   Future<void> _doRestore() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.any);
@@ -48,73 +58,133 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       return;
     }
 
+    final validation = _backupService.validateEnvelope(envelope, path: pickedPath);
+    if (!validation.isValid) {
+      await _showIssuesDialog('این Backup قابل بازیابی نیست', validation.errors);
+      return;
+    }
     if (!mounted) return;
 
+    // انتخاب حالت
     RestoreMode mode;
     if (envelope.backupType == BackupType.settings) {
-      // بازیابی تنظیمات حالت افزودن/جایگزینی ندارد.
-      final ok = await _showSettingsRestoreDialog(envelope);
+      final ok = await _showSettingsRestoreDialog(envelope, validation.warnings);
       if (ok != true) return;
-      mode = RestoreMode.merge;
+      mode = RestoreMode.merge; // برای تنظیمات تأثیری ندارد
     } else {
-      final picked = await _showRestoreSummaryDialog(envelope);
+      final picked = await _showRestoreSummaryDialog(envelope, validation.warnings);
       if (picked == null) return;
       mode = picked;
-      if (mode == RestoreMode.replace) {
-        final confirmed = await _confirmReplace(envelope);
-        if (confirmed != true) return;
-      }
     }
 
+    // Backup اضطراری + Restore آزمایشی
+    File? snapshot;
     setState(() => _busy = true);
     try {
-      final report = await _backupService.restore(envelope, mode);
-
-      // رنگ اصلی برنامه جزو تنظیمات است؛ بعد از بازیابی بلافاصله اعمال شود.
-      if (report.settingsRestored) {
-        final s = await SettingsRepository().getSettings();
-        if (mounted) ReceiptApp.of(context)?.updateColor(s.primaryColorHex);
+      snapshot = await _backupService.createPreRestoreSnapshot();
+      final dry = await _backupService.dryRun(envelope, mode);
+      if (dry.issues.isNotEmpty) {
+        if (mounted) setState(() => _busy = false);
+        await _showIssuesDialog('Restore آزمایشی مشکل پیدا کرد؛ Restore واقعی انجام نشد', dry.issues);
+        return;
       }
+    } catch (e) {
+      _showMsg('Restore انجام نشد و اطلاعات شما تغییری نکرد: $e');
+      return;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (snapshot == null || !mounted) return;
 
-      if (mounted) {
+    // تأیید نهایی
+    final go = await _confirmFinalRestore(envelope, mode, snapshot);
+    if (go != true) return;
+
+    // Restore واقعی
+    setState(() => _busy = true);
+    try {
+      final report = await _backupService.restore(envelope, mode, snapshot: snapshot);
+      if (report.settingsRestored) await _applyThemeColorFromSettings();
+      if (!mounted) return;
+
+      if (report.issues.isNotEmpty) {
+        final rollback = await _showPostRestoreIssuesDialog(report);
+        if (rollback == true) {
+          await _backupService.rollbackToSnapshot(snapshot);
+          await _applyThemeColorFromSettings();
+          _showMsg('اطلاعات به وضعیت قبل از Restore برگردانده شد.');
+        }
+      } else {
         await showDialog<void>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('نتیجه‌ی بازیابی'),
-            content: SingleChildScrollView(child: Text(report.summary().isEmpty ? 'تغییری اعمال نشد.' : report.summary())),
+            content: SingleChildScrollView(
+                child: Text(report.summary().isEmpty ? 'تغییری اعمال نشد.' : report.summary())),
             actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('باشه'))],
           ),
         );
       }
     } catch (e) {
-      _showMsg('خطا در بازیابی: $e');
+      _showMsg('خطا در بازیابی (اطلاعات قبلی دست‌نخورده ماند): $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Widget _backupInfo(BackupEnvelope envelope) {
-    final countsText = envelope.recordCounts.entries.map((e) => '${e.key}: ${e.value}').join('\n');
+  // ---------------- دیالوگ‌ها ----------------
+
+  Widget _backupInfo(BackupEnvelope envelope, List<String> warnings) {
+    final counts = envelope.recordCounts.entries
+        .where((e) => e.key != 'invoice_layout' && e.key != 'stamp_image')
+        .map((e) => '${BackupService.sectionLabel(e.key)}: ${e.value}')
+        .join('\n');
+    final hasSettings = envelope.data['app_settings'] is Map;
     return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('نوع: ${envelope.backupType.label}'),
       const SizedBox(height: 4),
       Text('تاریخ ایجاد: ${PersianDateUtil.formatDateTime(envelope.createdAt)}'),
       const SizedBox(height: 4),
       Text('آخرین به‌روزرسانی: ${PersianDateUtil.formatDateTime(envelope.updatedAt)}'),
+      const SizedBox(height: 4),
+      Text('نسخه‌ی Backup: ${envelope.backupVersion}'),
+      const SizedBox(height: 4),
+      Text('تنظیمات برنامه داخل Backup: ${hasSettings ? 'دارد' : 'ندارد'}'),
       const SizedBox(height: 10),
       const Text('تعداد رکوردها:', style: TextStyle(fontWeight: FontWeight.bold)),
-      Text(countsText),
+      Text(counts.isEmpty ? '—' : counts),
+      for (final w in warnings) ...[
+        const SizedBox(height: 8),
+        Text(w, style: const TextStyle(fontSize: 12, color: Colors.orange)),
+      ],
     ]);
   }
 
-  Future<bool?> _showSettingsRestoreDialog(BackupEnvelope envelope) {
+  Future<void> _showIssuesDialog(String title, List<String> issues) {
+    return showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final i in issues) Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('• $i')),
+            const SizedBox(height: 8),
+            const Text('هیچ تغییری روی اطلاعات شما اعمال نشد.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ]),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('باشه'))],
+      ),
+    );
+  }
+
+  Future<bool?> _showSettingsRestoreDialog(BackupEnvelope envelope, List<String> warnings) {
     return showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('بازیابی تنظیمات'),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _backupInfo(envelope),
+            _backupInfo(envelope, warnings),
             const SizedBox(height: 16),
             const Text(
               'فقط تنظیمات برنامه، قالب فاکتور و عکس مهر بازیابی می‌شوند و شماره کارت/شبای جدید اضافه می‌شود. '
@@ -125,20 +195,20 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('بازیابی تنظیمات')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('ادامه')),
         ],
       ),
     );
   }
 
-  Future<RestoreMode?> _showRestoreSummaryDialog(BackupEnvelope envelope) {
+  Future<RestoreMode?> _showRestoreSummaryDialog(BackupEnvelope envelope, List<String> warnings) {
     return showDialog<RestoreMode>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text('Backup ${envelope.backupType.label}'),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _backupInfo(envelope),
+            _backupInfo(envelope, warnings),
             if (envelope.backupType == BackupType.full) ...[
               const SizedBox(height: 10),
               const Text(
@@ -163,19 +233,57 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     );
   }
 
-  Future<bool?> _confirmReplace(BackupEnvelope envelope) {
+  Future<bool?> _confirmFinalRestore(BackupEnvelope envelope, RestoreMode mode, File snapshot) {
+    final replace = envelope.backupType != BackupType.settings && mode == RestoreMode.replace;
+    final snapName = snapshot.path.split('/').last;
     return showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('تأیید جایگزینی'),
-        content: Text(
-            'این عملیات اطلاعات فعلی بخش «${envelope.backupType.label}» را حذف کرده و اطلاعات Backup را جایگزین می‌کند.\nآیا مطمئن هستید؟',
-            style: const TextStyle(color: Colors.red)),
+        title: const Text('تأیید نهایی بازیابی'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('قبل از Restore یک Backup اضطراری از اطلاعات فعلی تهیه شده است ($snapName) و Restore آزمایشی هم موفق بود.'),
+            const SizedBox(height: 10),
+            if (replace)
+              Text(
+                'این عملیات اطلاعات فعلی بخش «${envelope.backupType.label}» را حذف کرده و اطلاعات Backup را جایگزین می‌کند.',
+                style: const TextStyle(color: Colors.red),
+              ),
+            const SizedBox(height: 10),
+            const Text('آیا مطمئن هستید که می‌خواهید این Backup را بازیابی کنید؟',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ]),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('لغو')),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('جایگزینی', style: TextStyle(color: Colors.red))),
+              child: Text('ادامه Restore', style: TextStyle(color: replace ? Colors.red : null))),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _showPostRestoreIssuesDialog(RestoreReport report) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('بعد از بازیابی مشکل پیدا شد'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final i in report.issues) Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('• $i')),
+            const SizedBox(height: 8),
+            const Text(
+              'می‌توانید اطلاعات را به وضعیت قبل از Restore برگردانید (از Backup اضطراری).',
+              style: TextStyle(fontSize: 12),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('همین‌طور بماند')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('برگشت به قبل از Restore', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -251,7 +359,9 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
           const SizedBox(height: 12),
           const Text('بازیابی (Restore)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
           const SizedBox(height: 6),
-          const Text('یک فایل Backup را انتخاب کنید؛ نوع، تاریخ و تعداد رکوردهای آن قبل از بازیابی نمایش داده می‌شود.',
+          const Text(
+              'یک فایل Backup را انتخاب کنید؛ نوع، تاریخ و تعداد رکوردهای آن قبل از بازیابی نمایش داده می‌شود. '
+              'قبل از هر بازیابی یک Backup اضطراری از اطلاعات فعلی گرفته و یک بازیابی آزمایشی روی کپی انجام می‌شود.',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
           const SizedBox(height: 12),
           OutlinedButton.icon(
