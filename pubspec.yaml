@@ -41,6 +41,9 @@ dependencies:
   mobile_scanner: ^6.0.0
   speech_to_text: ^7.0.0
 
+  # خواندن متن PDF برای ورود نرخ از فایل (آفلاین، بدون اینترنت)
+  pdfrx: ^2.3.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
