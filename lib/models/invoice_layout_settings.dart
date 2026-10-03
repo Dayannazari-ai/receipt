@@ -37,11 +37,27 @@ class InvoiceLayoutSettings {
   final double headerSpacingAfter;
   final double headerPaddingTop; // فاصله‌ی بالای محتوای سربرگ (معادل فعلی: ۵)
   final double headerPaddingBottom; // فاصله‌ی پایین محتوای سربرگ (معادل فعلی: ۵)
-  final double headerLogoToContactSpacing; // فاصله‌ی لوگو تا خط تماس
-  final double headerAddressTopPadding; // فاصله‌ی بالای خط آدرس
-  final double headerIconToTextSpacing; // فاصله‌ی آیکون (تلفن/لوکیشن) تا متن
+  final double headerLogoToContactSpacing; // (قدیمی؛ در چیدمان جدید سربرگ استفاده نمی‌شود)
+  final double headerAddressTopPadding; // فاصله‌ی بالای خط آدرس/اینستاگرام
+  final double headerIconToTextSpacing; // فاصله‌ی آیکون (تلفن/لوکیشن/اینستاگرام) تا متن
   final double headerInfoToIconsRowSpacing; // فاصله‌ی متن‌های تاریخ/شماره تا ستون آیکون‌ها
   final double headerBottomLineThickness; // ضخامت خط زیر سربرگ
+
+  // ---------- سربرگ: تماس و اینستاگرام (جدید) ----------
+  /// شماره تلفن سربرگ. خالی = استفاده از شماره‌ی تنظیمات برنامه.
+  final String headerPhoneOverride;
+
+  /// آدرس سربرگ. خالی = استفاده از آدرس تنظیمات برنامه.
+  final String headerAddressOverride;
+  final bool instagramEnabled; // نمایش ردیف اینستاگرام
+  final String instagramUsername; // آدرس/نام کاربری اینستاگرام (هیچ مقدار ثابتی در کد نیست)
+  final bool instagramIconVisible; // نمایش آیکون اینستاگرام کنار متن
+  final String instagramIconCustomPath; // خالی = آیکون پیش‌فرض assets
+  final String logoCustomPath; // خالی = لوگوی پیش‌فرض assets
+  final double instagramIconSize;
+  final double headerSectionGap; // فاصله‌ی بین سه بخش سربرگ (دو طرف خط جداکننده)
+  final double headerDividerWidth; // ضخامت خط جداکننده‌ی بخش‌های سربرگ
+  final double headerDividerHeight; // ارتفاع خط جداکننده‌ی بخش‌های سربرگ
 
   // ---------- حاشیه‌ی صفحه ----------
   final double pageMarginHorizontal;
@@ -134,7 +150,7 @@ class InvoiceLayoutSettings {
     this.colorSubtleText = 0xFF616161, // معادل PdfColors.grey700
     this.colorText = 0xFF000000,
     // تصاویر
-    this.logoImageHeight = 40,
+    this.logoImageHeight = 30, // کم‌ارتفاع‌تر از قبل (قبلاً ۴۰) برای سربرگ جمع‌وجور
     this.logoOffsetX = 0,
     this.logoOffsetY = 0,
     this.iconsRowImageHeight = 34,
@@ -159,6 +175,18 @@ class InvoiceLayoutSettings {
     this.headerIconToTextSpacing = 3,
     this.headerInfoToIconsRowSpacing = 6,
     this.headerBottomLineThickness = 1.2,
+    // سربرگ: تماس و اینستاگرام
+    this.headerPhoneOverride = '',
+    this.headerAddressOverride = '',
+    this.instagramEnabled = true,
+    this.instagramUsername = '',
+    this.instagramIconVisible = true,
+    this.instagramIconCustomPath = '',
+    this.logoCustomPath = '',
+    this.instagramIconSize = 8,
+    this.headerSectionGap = 6,
+    this.headerDividerWidth = 0.6,
+    this.headerDividerHeight = 32,
     // حاشیه
     this.pageMarginHorizontal = 12,
     this.pageMarginVertical = 0,
@@ -252,6 +280,16 @@ class InvoiceLayoutSettings {
       return v is num ? v.toInt() : fallback;
     }
 
+    bool boolean(String key, bool fallback) {
+      final v = json[key];
+      return v is bool ? v : fallback;
+    }
+
+    String str(String key, String fallback) {
+      final v = json[key];
+      return v is String ? v : fallback;
+    }
+
     return InvoiceLayoutSettings(
       colorOrange: integer('colorOrange', d.colorOrange),
       colorDarkGray: integer('colorDarkGray', d.colorDarkGray),
@@ -288,6 +326,17 @@ class InvoiceLayoutSettings {
       headerInfoToIconsRowSpacing:
           dbl('headerInfoToIconsRowSpacing', d.headerInfoToIconsRowSpacing),
       headerBottomLineThickness: dbl('headerBottomLineThickness', d.headerBottomLineThickness),
+      headerPhoneOverride: str('headerPhoneOverride', d.headerPhoneOverride),
+      headerAddressOverride: str('headerAddressOverride', d.headerAddressOverride),
+      instagramEnabled: boolean('instagramEnabled', d.instagramEnabled),
+      instagramUsername: str('instagramUsername', d.instagramUsername),
+      instagramIconVisible: boolean('instagramIconVisible', d.instagramIconVisible),
+      instagramIconCustomPath: str('instagramIconCustomPath', d.instagramIconCustomPath),
+      logoCustomPath: str('logoCustomPath', d.logoCustomPath),
+      instagramIconSize: dbl('instagramIconSize', d.instagramIconSize),
+      headerSectionGap: dbl('headerSectionGap', d.headerSectionGap),
+      headerDividerWidth: dbl('headerDividerWidth', d.headerDividerWidth),
+      headerDividerHeight: dbl('headerDividerHeight', d.headerDividerHeight),
       pageMarginHorizontal: dbl('pageMarginHorizontal', d.pageMarginHorizontal),
       pageMarginVertical: dbl('pageMarginVertical', d.pageMarginVertical),
       pageMarginTop: dbl('pageMarginTop', d.pageMarginTop),
@@ -393,6 +442,17 @@ class InvoiceLayoutSettings {
         'headerIconToTextSpacing': headerIconToTextSpacing,
         'headerInfoToIconsRowSpacing': headerInfoToIconsRowSpacing,
         'headerBottomLineThickness': headerBottomLineThickness,
+        'headerPhoneOverride': headerPhoneOverride,
+        'headerAddressOverride': headerAddressOverride,
+        'instagramEnabled': instagramEnabled,
+        'instagramUsername': instagramUsername,
+        'instagramIconVisible': instagramIconVisible,
+        'instagramIconCustomPath': instagramIconCustomPath,
+        'logoCustomPath': logoCustomPath,
+        'instagramIconSize': instagramIconSize,
+        'headerSectionGap': headerSectionGap,
+        'headerDividerWidth': headerDividerWidth,
+        'headerDividerHeight': headerDividerHeight,
         'pageMarginHorizontal': pageMarginHorizontal,
         'pageMarginVertical': pageMarginVertical,
         'pageMarginTop': pageMarginTop,
@@ -495,6 +555,17 @@ class InvoiceLayoutSettings {
     double? headerIconToTextSpacing,
     double? headerInfoToIconsRowSpacing,
     double? headerBottomLineThickness,
+    String? headerPhoneOverride,
+    String? headerAddressOverride,
+    bool? instagramEnabled,
+    String? instagramUsername,
+    bool? instagramIconVisible,
+    String? instagramIconCustomPath,
+    String? logoCustomPath,
+    double? instagramIconSize,
+    double? headerSectionGap,
+    double? headerDividerWidth,
+    double? headerDividerHeight,
     double? pageMarginHorizontal,
     double? pageMarginVertical,
     double? pageMarginTop,
@@ -598,6 +669,17 @@ class InvoiceLayoutSettings {
       headerInfoToIconsRowSpacing:
           headerInfoToIconsRowSpacing ?? this.headerInfoToIconsRowSpacing,
       headerBottomLineThickness: headerBottomLineThickness ?? this.headerBottomLineThickness,
+      headerPhoneOverride: headerPhoneOverride ?? this.headerPhoneOverride,
+      headerAddressOverride: headerAddressOverride ?? this.headerAddressOverride,
+      instagramEnabled: instagramEnabled ?? this.instagramEnabled,
+      instagramUsername: instagramUsername ?? this.instagramUsername,
+      instagramIconVisible: instagramIconVisible ?? this.instagramIconVisible,
+      instagramIconCustomPath: instagramIconCustomPath ?? this.instagramIconCustomPath,
+      logoCustomPath: logoCustomPath ?? this.logoCustomPath,
+      instagramIconSize: instagramIconSize ?? this.instagramIconSize,
+      headerSectionGap: headerSectionGap ?? this.headerSectionGap,
+      headerDividerWidth: headerDividerWidth ?? this.headerDividerWidth,
+      headerDividerHeight: headerDividerHeight ?? this.headerDividerHeight,
       pageMarginHorizontal: pageMarginHorizontal ?? this.pageMarginHorizontal,
       pageMarginVertical: pageMarginVertical ?? this.pageMarginVertical,
       pageMarginTop: pageMarginTop ?? this.pageMarginTop,
