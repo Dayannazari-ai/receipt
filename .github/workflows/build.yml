@@ -36,6 +36,15 @@ jobs:
             patch_gradle "$dir/android/build.gradle.kts"
           done
           echo "Patch step completed successfully"
+      - name: Patch pdfrx_engine nullable cache access
+        run: |
+          f=$(find ~/.pub-cache/hosted/pub.dev -path "*pdfrx_engine-*/lib/src/native/pdf_file_cache.dart" | head -n 1)
+          if [ -n "$f" ]; then
+            sed -i -e 's/\bcache\.blockSize/cache!.blockSize/g' -e 's/await cache\.read(/await cache!.read(/g' "$f"
+            echo "Patched $f"
+          else
+            echo "pdf_file_cache.dart not found - skipped"
+          fi
       - name: Build APK
         run: flutter build apk --release
       - name: Upload APK
