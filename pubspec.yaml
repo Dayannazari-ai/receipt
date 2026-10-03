@@ -44,6 +44,10 @@ dependencies:
   # خواندن متن PDF برای ورود نرخ از فایل (آفلاین، بدون اینترنت)
   pdfrx: ^2.3.4
 
+# اصلاح خطای کامپایل pdfrx_engine 0.4.4 (دسترسی null به PdfFileCache)
+dependency_overrides:
+  pdfrx_engine: ^0.4.7
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
