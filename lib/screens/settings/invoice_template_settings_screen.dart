@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import '../../models/app_settings.dart';
 import '../../models/customer.dart';
@@ -30,6 +34,11 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
   /// با هر افزایش این عدد، PdfPreview دوباره ساخته می‌شود.
   int _previewVersion = 0;
   Timer? _timer;
+
+  // کنترلرهای متن سربرگ (تلفن، آدرس، اینستاگرام)
+  final TextEditingController _phoneCtrl = TextEditingController();
+  final TextEditingController _addressCtrl = TextEditingController();
+  final TextEditingController _instagramCtrl = TextEditingController();
 
   // ---------- فاکتور نمونه (فقط در حافظه، برای پیش‌نمایش) ----------
   late final Invoice _sampleInvoice = Invoice(
@@ -87,6 +96,9 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
   @override
   void dispose() {
     _timer?.cancel();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    _instagramCtrl.dispose();
     super.dispose();
   }
 
@@ -102,6 +114,9 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
     setState(() {
       _layout = layout;
       _appSettings = settings;
+      _phoneCtrl.text = layout.headerPhoneOverride;
+      _addressCtrl.text = layout.headerAddressOverride;
+      _instagramCtrl.text = layout.instagramUsername;
       _loading = false;
     });
   }
@@ -125,6 +140,11 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
       _previewVersion++;
     });
     InvoiceLayoutStorage.save(_layout);
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // ---------- ساخت رشته‌ی نمایش عدد ----------
@@ -183,6 +203,62 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
     );
   }
 
+  Widget _textFieldRow({
+    required String label,
+    required TextEditingController controller,
+    required ValueChanged<String> onChanged,
+    String? hint,
+    TextDirection? textDirection,
+    TextInputType? keyboardType,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: TextField(
+        controller: controller,
+        textDirection: textDirection,
+        keyboardType: keyboardType,
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+      ),
+    );
+  }
+
+  /// انتخاب یک تصویر از گوشی و کپی آن در پوشه‌ی داخلی برنامه (تا بعد از
+  /// بستن برنامه هم باقی بماند). اگر کاربر انصراف دهد null برمی‌گردد.
+  Future<String?> _pickAndStoreImage(String baseName) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.image);
+      if (result == null || result.files.isEmpty) return null;
+      final src = result.files.single.path;
+      if (src == null) return null;
+      final dir = await getApplicationDocumentsDirectory();
+      final ext = p.extension(src).isEmpty ? '.png' : p.extension(src);
+      final dest = File(p.join(dir.path, '$baseName$ext'));
+      await File(src).copy(dest.path);
+      return dest.path;
+    } catch (_) {
+      _snack('انتخاب تصویر انجام نشد');
+      return null;
+    }
+  }
+
+  Future<void> _pickLogo() async {
+    final path = await _pickAndStoreImage('header_logo_custom');
+    if (path == null) return;
+    _update(_layout.copyWith(logoCustomPath: path));
+  }
+
+  Future<void> _pickInstagramIcon() async {
+    final path = await _pickAndStoreImage('header_instagram_icon_custom');
+    if (path == null) return;
+    _update(_layout.copyWith(instagramIconCustomPath: path));
+  }
+
   // ---------- گروه لوگو ----------
   void _resetLogoGroup() {
     const d = InvoiceLayoutSettings.defaults;
@@ -215,6 +291,27 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
           min: -60,
           max: 60,
           onChanged: (v) => _update(_layout.copyWith(logoOffsetY: v)),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.image_outlined, size: 18),
+                label: const Text('تغییر لوگو'),
+                onPressed: _pickLogo,
+              ),
+            ),
+            if (_layout.logoCustomPath.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _update(_layout.copyWith(logoCustomPath: '')),
+                  child: const Text('لوگوی پیش‌فرض'),
+                ),
+              ),
+            ],
+          ]),
         ),
       ];
 
@@ -282,6 +379,106 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
           min: 4,
           max: 16,
           onChanged: (v) => _update(_layout.copyWith(headerSubTitleFontSize: v)),
+        ),
+      ];
+
+  // ---------- گروه تماس و اینستاگرام (جدید) ----------
+  void _resetContactGroup() {
+    const d = InvoiceLayoutSettings.defaults;
+    _phoneCtrl.text = d.headerPhoneOverride;
+    _addressCtrl.text = d.headerAddressOverride;
+    _instagramCtrl.text = d.instagramUsername;
+    _update(_layout.copyWith(
+      headerPhoneOverride: d.headerPhoneOverride,
+      headerAddressOverride: d.headerAddressOverride,
+      instagramEnabled: d.instagramEnabled,
+      instagramUsername: d.instagramUsername,
+      instagramIconVisible: d.instagramIconVisible,
+      instagramIconCustomPath: d.instagramIconCustomPath,
+      instagramIconSize: d.instagramIconSize,
+      headerSectionGap: d.headerSectionGap,
+      headerDividerWidth: d.headerDividerWidth,
+      headerDividerHeight: d.headerDividerHeight,
+    ));
+  }
+
+  List<Widget> _contactGroup() => [
+        _groupHeader('تماس و اینستاگرام', _resetContactGroup),
+        _textFieldRow(
+          label: 'شماره تلفن سربرگ',
+          hint: 'خالی = از تنظیمات برنامه',
+          controller: _phoneCtrl,
+          keyboardType: TextInputType.phone,
+          onChanged: (v) => _update(_layout.copyWith(headerPhoneOverride: v)),
+        ),
+        _textFieldRow(
+          label: 'آدرس سربرگ',
+          hint: 'خالی = از تنظیمات برنامه',
+          controller: _addressCtrl,
+          onChanged: (v) => _update(_layout.copyWith(headerAddressOverride: v)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: const Text('نمایش اینستاگرام', style: TextStyle(fontSize: 13)),
+          value: _layout.instagramEnabled,
+          onChanged: (v) => _updateImmediate(_layout.copyWith(instagramEnabled: v)),
+        ),
+        _textFieldRow(
+          label: 'آدرس / Username اینستاگرام',
+          controller: _instagramCtrl,
+          textDirection: TextDirection.ltr,
+          keyboardType: TextInputType.url,
+          onChanged: (v) => _update(_layout.copyWith(instagramUsername: v)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: const Text('نمایش آیکون Instagram', style: TextStyle(fontSize: 13)),
+          value: _layout.instagramIconVisible,
+          onChanged: (v) => _updateImmediate(_layout.copyWith(instagramIconVisible: v)),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.image_outlined, size: 18),
+                label: const Text('تغییر آیکون'),
+                onPressed: _pickInstagramIcon,
+              ),
+            ),
+            if (_layout.instagramIconCustomPath.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _update(_layout.copyWith(instagramIconCustomPath: '')),
+                  child: const Text('آیکون پیش‌فرض'),
+                ),
+              ),
+            ],
+          ]),
+        ),
+        _sliderRow(
+          label: 'اندازه آیکون',
+          value: _layout.instagramIconSize,
+          min: 4,
+          max: 20,
+          onChanged: (v) => _update(_layout.copyWith(instagramIconSize: v)),
+        ),
+        _sliderRow(
+          label: 'فاصله بین بخش‌ها',
+          value: _layout.headerSectionGap,
+          min: 0,
+          max: 20,
+          onChanged: (v) => _update(_layout.copyWith(headerSectionGap: v)),
+        ),
+        _sliderRow(
+          label: 'ارتفاع خط جداکننده',
+          value: _layout.headerDividerHeight,
+          min: 0,
+          max: 60,
+          onChanged: (v) => _update(_layout.copyWith(headerDividerHeight: v)),
         ),
       ];
 
@@ -714,6 +911,9 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
     if (!mounted) return;
     setState(() {
       _layout = InvoiceLayoutSettings.defaults;
+      _phoneCtrl.text = _layout.headerPhoneOverride;
+      _addressCtrl.text = _layout.headerAddressOverride;
+      _instagramCtrl.text = _layout.instagramUsername;
       _previewVersion++;
     });
   }
@@ -761,6 +961,8 @@ class _InvoiceTemplateSettingsScreenState extends State<InvoiceTemplateSettingsS
               ..._logoGroup(),
               const Divider(),
               ..._headerGroup(),
+              const Divider(),
+              ..._contactGroup(),
               const Divider(),
               ..._tableGroup(),
               const Divider(),
