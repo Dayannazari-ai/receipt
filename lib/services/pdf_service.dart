@@ -57,6 +57,7 @@ class _Palette {
 ///   assets/invoice_important_icon.png
 ///   assets/invoice_location_icon.png
 ///   assets/invoice_phone_icon.png
+///   assets/invoice_instagram_icon.png
 class PdfService {
   static pw.Font? _regularFont;
   static pw.Font? _boldFont;
@@ -67,6 +68,7 @@ class PdfService {
   static pw.MemoryImage? _importantIconImage;
   static pw.MemoryImage? _locationIconImage;
   static pw.MemoryImage? _phoneIconImage;
+  static pw.MemoryImage? _instagramIconImage;
   static bool _assetsLoaded = false;
 
   static Future<void> _loadFonts() async {
@@ -91,6 +93,19 @@ class PdfService {
     }
   }
 
+  /// خواندن تصویر انتخاب‌شده‌ی کاربر از حافظه‌ی گوشی. اگر مسیر خالی یا
+  /// فایل ناموجود/خراب باشد، null برمی‌گردد و تصویر پیش‌فرض استفاده می‌شود.
+  static Future<pw.MemoryImage?> _tryLoadFileImage(String path) async {
+    if (path.isEmpty) return null;
+    try {
+      final file = File(path);
+      if (!await file.exists()) return null;
+      return pw.MemoryImage(await file.readAsBytes());
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<void> _loadImages() async {
     if (_assetsLoaded) return;
     _logoImage = await _tryLoadImage('assets/invoice_logo.png');
@@ -99,6 +114,7 @@ class PdfService {
     _importantIconImage = await _tryLoadImage('assets/invoice_important_icon.png');
     _locationIconImage = await _tryLoadImage('assets/invoice_location_icon.png');
     _phoneIconImage = await _tryLoadImage('assets/invoice_phone_icon.png');
+    _instagramIconImage = await _tryLoadImage('assets/invoice_instagram_icon.png');
     _assetsLoaded = true;
   }
 
@@ -122,6 +138,12 @@ class PdfService {
 
     await _loadFonts();
     await _loadImages();
+
+    // لوگو و آیکون اینستاگرام: انتخاب کاربر در صورت وجود، وگرنه پیش‌فرض assets.
+    final headerLogo = await _tryLoadFileImage(l.logoCustomPath) ?? _logoImage;
+    final instagramIcon =
+        await _tryLoadFileImage(l.instagramIconCustomPath) ?? _instagramIconImage;
+
     final doc = pw.Document();
     final theme = _regularFont != null
         ? pw.ThemeData.withFont(base: _regularFont!, bold: _boldFont ?? _regularFont!)
@@ -143,7 +165,7 @@ class PdfService {
         textDirection: pw.TextDirection.rtl,
         pageFormat: PdfPageFormat.a5,
         margin: pw.EdgeInsets.zero,
-        header: (context) => _header(l, c, settings, invoice),
+        header: (context) => _header(l, c, settings, invoice, headerLogo, instagramIcon),
         footer: (context) => _bottomBar(l, c),
         build: (context) => [
           // اطلاعات مشتری، خارج از جدول‌ها، یک آیتم مستقل.
@@ -195,10 +217,29 @@ class PdfService {
     return file;
   }
 
-  /// سربرگ: نوار نارنجی بالا، سمت راست لوگوی تصویری + نام/تماس/آدرس پویا،
-  /// سمت چپ آیکون‌های تصویری تاریخ/شماره/نوع فاکتور کنار متن پویا.
-  static pw.Widget _header(
-      InvoiceLayoutSettings l, _Palette c, AppSettings settings, Invoice invoice) {
+  /// خط جداکننده‌ی عمودی بین بخش‌های سربرگ.
+  static pw.Widget _headerDivider(InvoiceLayoutSettings l, _Palette c) => pw.Container(
+        width: l.headerDividerWidth,
+        height: l.headerDividerHeight,
+        color: c.border,
+      );
+
+  /// سربرگ: نوار نارنجی بالا، و زیر آن یک ردیف سه‌بخشی (از راست به چپ):
+  /// ۱) لوگوی کارگاه  ۲) بخش میانی: تلفن، آدرس و ردیف اینستاگرام
+  /// ۳) تاریخ/شماره/نوع فاکتور کنار آیکون‌های تصویری.
+  static pw.Widget _header(InvoiceLayoutSettings l, _Palette c, AppSettings settings,
+      Invoice invoice, pw.MemoryImage? logo, pw.MemoryImage? instagramIcon) {
+    // تلفن و آدرس: مقدار واردشده در تنظیمات قالب؛ اگر خالی بود از تنظیمات برنامه.
+    final phone = l.headerPhoneOverride.trim().isNotEmpty
+        ? l.headerPhoneOverride.trim()
+        : settings.contactNumber;
+    final address = l.headerAddressOverride.trim().isNotEmpty
+        ? l.headerAddressOverride.trim()
+        : settings.address;
+    final instagramUser = l.instagramUsername.trim();
+    final showInstagram = l.instagramEnabled && instagramUser.isNotEmpty;
+    final igIcon = instagramIcon;
+
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
       pw.Container(height: l.topBarHeight, color: c.orange),
       pw.Padding(
@@ -206,46 +247,73 @@ class PdfService {
             l.pageMarginLeft, l.headerPaddingTop, l.pageMarginRight, l.headerPaddingBottom),
         child: pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.center,
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            // سمت راست: لوگو + نام مجموعه + تماس/آدرس (اطلاعات واقعی از تنظیمات)
-            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              _shift(
-                _logoImage != null
-                    ? pw.Image(_logoImage!, height: l.logoImageHeight)
-                    : pw.Text(settings.shopName,
-                        style: pw.TextStyle(
-                            fontSize: l.headerCompanyNameFontSize,
-                            fontWeight: pw.FontWeight.bold,
-                            color: c.darkGray)),
-                l.logoOffsetX,
-                l.logoOffsetY,
-              ),
-              pw.SizedBox(height: l.headerLogoToContactSpacing),
-              if (settings.contactNumber.isNotEmpty)
-                pw.Row(children: [
-                  if (_phoneIconImage != null) ...[
-                    pw.Image(_phoneIconImage!, width: l.contactIconSize, height: l.contactIconSize),
-                    pw.SizedBox(width: l.headerIconToTextSpacing),
-                  ],
-                  pw.Text(PersianDateUtil.toPersianDigits(settings.contactNumber),
-                      style: pw.TextStyle(fontSize: l.headerContactFontSize, color: c.orange)),
-                ]),
-              if (settings.address.isNotEmpty)
-                pw.Padding(
-                  padding: pw.EdgeInsets.only(top: l.headerAddressTopPadding),
-                  child: pw.Row(children: [
-                    if (_locationIconImage != null) ...[
-                      pw.Image(_locationIconImage!, width: l.contactIconSize, height: l.contactIconSize),
-                      pw.SizedBox(width: l.headerIconToTextSpacing),
-                    ],
-                    pw.Flexible(
-                      child: pw.Text(settings.address,
-                          style: pw.TextStyle(fontSize: l.headerSubTitleFontSize, color: c.subtleText)),
+            // سمت راست: لوگوی کارگاه
+            _shift(
+              logo != null
+                  ? pw.Image(logo, height: l.logoImageHeight)
+                  : pw.Text(settings.shopName,
+                      style: pw.TextStyle(
+                          fontSize: l.headerCompanyNameFontSize,
+                          fontWeight: pw.FontWeight.bold,
+                          color: c.darkGray)),
+              l.logoOffsetX,
+              l.logoOffsetY,
+            ),
+            pw.SizedBox(width: l.headerSectionGap),
+            _headerDivider(l, c),
+            pw.SizedBox(width: l.headerSectionGap),
+            // بخش میانی: تلفن، آدرس، اینستاگرام
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                mainAxisAlignment: pw.MainAxisAlignment.center,
+                children: [
+                  if (phone.isNotEmpty)
+                    pw.Row(children: [
+                      if (_phoneIconImage != null) ...[
+                        pw.Image(_phoneIconImage!, width: l.contactIconSize, height: l.contactIconSize),
+                        pw.SizedBox(width: l.headerIconToTextSpacing),
+                      ],
+                      pw.Text(PersianDateUtil.toPersianDigits(phone),
+                          style: pw.TextStyle(fontSize: l.headerContactFontSize, color: c.orange)),
+                    ]),
+                  if (address.isNotEmpty)
+                    pw.Padding(
+                      padding: pw.EdgeInsets.only(top: l.headerAddressTopPadding),
+                      child: pw.Row(children: [
+                        if (_locationIconImage != null) ...[
+                          pw.Image(_locationIconImage!, width: l.contactIconSize, height: l.contactIconSize),
+                          pw.SizedBox(width: l.headerIconToTextSpacing),
+                        ],
+                        pw.Flexible(
+                          child: pw.Text(address,
+                              style: pw.TextStyle(fontSize: l.headerSubTitleFontSize, color: c.subtleText)),
+                        ),
+                      ]),
                     ),
-                  ]),
-                ),
-            ]),
+                  if (showInstagram)
+                    pw.Padding(
+                      padding: pw.EdgeInsets.only(top: l.headerAddressTopPadding),
+                      child: pw.Row(children: [
+                        if (l.instagramIconVisible && igIcon != null) ...[
+                          pw.Image(igIcon,
+                              width: l.instagramIconSize,
+                              height: l.instagramIconSize,
+                              fit: pw.BoxFit.contain),
+                          pw.SizedBox(width: l.headerIconToTextSpacing),
+                        ],
+                        pw.Text(instagramUser,
+                            textDirection: pw.TextDirection.ltr,
+                            style: pw.TextStyle(fontSize: l.headerContactFontSize, color: c.darkGray)),
+                      ]),
+                    ),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: l.headerSectionGap),
+            _headerDivider(l, c),
+            pw.SizedBox(width: l.headerSectionGap),
             // سمت چپ: آیکون‌های تصویری + اطلاعات فاکتور (تاریخ/شماره/نوع - داده واقعی)
             pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
               pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
