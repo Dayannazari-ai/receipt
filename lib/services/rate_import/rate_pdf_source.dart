@@ -30,12 +30,8 @@ class PdfRateTableSource implements RateTableSource {
     final pages = <List<PdfTok>>[];
     try {
       for (final page in doc.pages) {
-        final PdfPageText? text = await page.loadText();
-        if (text == null) {
-          pages.add(<PdfTok>[]);
-        } else {
-          pages.add(_tokensOf(text));
-        }
+        final raw = await page.loadText();
+        pages.add(raw == null ? <PdfTok>[] : _tokensOf(raw));
       }
     } finally {
       doc.dispose();
@@ -103,51 +99,95 @@ String _fix(String s) {
   return sb.toString();
 }
 
-List<PdfTok> _tokensOf(PdfPageText text) {
+double _num(dynamic v) => (v as num).toDouble();
+
+/// کلمه‌ها را از متن کامل + مستطیل هر حرف می‌سازد.
+void _wordsFromChars(String s, List<dynamic> rects, List<PdfTok> out) {
+  final n = s.length < rects.length ? s.length : rects.length;
+  var i = 0;
+  while (i < n) {
+    if (_isSpace(s.codeUnitAt(i))) {
+      i++;
+      continue;
+    }
+    var j = i;
+    while (j < n && !_isSpace(s.codeUnitAt(j))) {
+      j++;
+    }
+    var l = double.infinity;
+    var r = -double.infinity;
+    var bt = double.infinity;
+    var tp = -double.infinity;
+    for (var k = i; k < j; k++) {
+      final c = rects[k];
+      final cl = _num(c.left);
+      final cr = _num(c.right);
+      final cb = _num(c.bottom);
+      final ct = _num(c.top);
+      if (cl < l) l = cl;
+      if (cr > r) r = cr;
+      if (cb < bt) bt = cb;
+      if (ct > tp) tp = ct;
+    }
+    final word = _fix(s.substring(i, j));
+    if (word.isNotEmpty && l.isFinite && r.isFinite) {
+      out.add(PdfTok(word, l, r, bt, tp));
+    }
+    i = j;
+  }
+}
+
+/// با نسخه‌های مختلف pdfrx سازگار است (PdfPageRawText یا PdfPageText) چون با dynamic کار می‌کند.
+List<PdfTok> _tokensOf(dynamic raw) {
   final out = <PdfTok>[];
-  for (final f in text.fragments) {
-    final s = f.text;
+  String? full;
+  List<dynamic>? rects;
+  try {
+    full = raw.fullText as String;
+  } catch (_) {}
+  try {
+    rects = (raw.charRects as List).cast<dynamic>();
+  } catch (_) {}
+  if (full != null && rects != null && rects.isNotEmpty) {
+    _wordsFromChars(full, rects, out);
+    return out;
+  }
+  List<dynamic>? frags;
+  try {
+    frags = (raw.fragments as List).cast<dynamic>();
+  } catch (_) {}
+  if (frags == null) return out;
+  for (final f in frags) {
+    final String s = f.text as String;
     final n = s.length;
     if (n == 0 || s.trim().isEmpty) continue;
-    final List<PdfRect>? rects = f.charRects;
-    final bool exact = rects != null && rects.length == n;
-    final b = f.bounds;
-    var i = 0;
-    while (i < n) {
-      if (_isSpace(s.codeUnitAt(i))) {
-        i++;
-        continue;
-      }
-      var j = i;
-      while (j < n && !_isSpace(s.codeUnitAt(j))) {
-        j++;
-      }
-      double l;
-      double r;
-      double bt;
-      double tp;
-      if (exact) {
-        l = double.infinity;
-        r = -double.infinity;
-        bt = double.infinity;
-        tp = -double.infinity;
-        for (var k = i; k < j; k++) {
-          final c = rects![k];
-          if (c.left < l) l = c.left;
-          if (c.right > r) r = c.right;
-          if (c.bottom < bt) bt = c.bottom;
-          if (c.top > tp) tp = c.top;
+    List<dynamic>? fr;
+    try {
+      final cr = f.charRects;
+      if (cr != null) fr = (cr as List).cast<dynamic>();
+    } catch (_) {}
+    if (fr != null && fr.length == n) {
+      _wordsFromChars(s, fr, out);
+    } else {
+      final b = f.bounds;
+      final bl = _num(b.left);
+      final w = _num(b.right) - bl;
+      var i = 0;
+      while (i < n) {
+        if (_isSpace(s.codeUnitAt(i))) {
+          i++;
+          continue;
         }
-      } else {
-        final w = b.right - b.left;
-        l = b.left + w * i / n;
-        r = b.left + w * j / n;
-        bt = b.bottom;
-        tp = b.top;
+        var j = i;
+        while (j < n && !_isSpace(s.codeUnitAt(j))) {
+          j++;
+        }
+        final word = _fix(s.substring(i, j));
+        if (word.isNotEmpty) {
+          out.add(PdfTok(word, bl + w * i / n, bl + w * j / n, _num(b.bottom), _num(b.top)));
+        }
+        i = j;
       }
-      final word = _fix(s.substring(i, j));
-      if (word.isNotEmpty) out.add(PdfTok(word, l, r, bt, tp));
-      i = j;
     }
   }
   return out;
