@@ -8,6 +8,7 @@ import '../../repositories/payment_account_repository.dart';
 import '../../services/backup_service.dart';
 import '../../services/seed_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/auto_backup_service.dart';
 import '../../main.dart';
 import 'price_list_import_screen.dart';
 import 'invoice_template_settings_screen.dart';
@@ -25,6 +26,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _paymentRepo = PaymentAccountRepository();
   final _backupService = BackupService();
   final _seedService = SeedService();
+  final _autoBackup = AutoBackupService();
 
   late TextEditingController _shopName;
   late TextEditingController _contactNumber;
@@ -36,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Currency _currency = Currency.toman;
   String _colorHex = '#FF7A1A';
   String? _stampImagePath;
+  String? _autoBackupDir;
   List<PaymentAccount> _accounts = [];
   bool _loading = true;
   bool _busy = false;
@@ -53,6 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final settings = await _repo.getSettings();
     final accounts = await _paymentRepo.getAll();
     final hasPassword = await _authService.hasPassword();
+    final autoBackupDir = await _autoBackup.getBackupDir();
     _shopName = TextEditingController(text: settings.shopName);
     _contactNumber = TextEditingController(text: settings.contactNumber);
     _address = TextEditingController(text: settings.address);
@@ -67,6 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _stampImagePath = settings.stampImagePath;
       _accounts = accounts;
       _hasPassword = hasPassword;
+      _autoBackupDir = autoBackupDir;
       _loading = false;
     });
   }
@@ -99,6 +104,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (result != null && result.files.single.path != null) {
       setState(() => _stampPathCtrl.text = result.files.single.path!);
     }
+  }
+
+  Future<void> _chooseAutoBackupDir() async {
+    try {
+      final dir = await _autoBackup.chooseAndSaveDir();
+      if (dir == null) return; // انصراف
+      if (!mounted) return;
+      setState(() => _autoBackupDir = dir);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مسیر پشتیبان ذخیره شد')));
+    } on AutoBackupException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطا: $e')));
+    }
+  }
+
+  Future<void> _clearAutoBackupDir() async {
+    await _autoBackup.clearBackupDir();
+    if (mounted) setState(() => _autoBackupDir = null);
   }
 
   Future<void> _addAccount() async {
@@ -435,6 +459,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const BackupRestoreScreen())),
           ),
+
+          const SizedBox(height: 28),
+          const Divider(),
+          const SizedBox(height: 12),
+          const Text('پشتیبان خودکار هنگام خروج', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const SizedBox(height: 6),
+          const Text(
+              'هنگام خروج از برنامه (دکمه‌ی بازگشت)، یک پشتیبان کامل با نام AutoBackup_تاریخ_ساعت در پوشه‌ی انتخابی ذخیره می‌شود. '
+              'این مسیر مخصوص همین دستگاه است و در پشتیبان تنظیمات نمی‌آید.',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 10),
+          Text(
+            _autoBackupDir == null ? 'مسیر پشتیبان: تعیین نشده' : 'مسیر پشتیبان: $_autoBackupDir',
+            style: TextStyle(
+                fontSize: 12,
+                color: _autoBackupDir == null ? Colors.orange : null,
+                fontWeight: FontWeight.bold),
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.start,
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.folder_open),
+            label: Text(_autoBackupDir == null ? 'تعیین مسیر پشتیبان' : 'تغییر مسیر پشتیبان'),
+            onPressed: _chooseAutoBackupDir,
+          ),
+          if (_autoBackupDir != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.clear),
+              label: const Text('حذف مسیر پشتیبان'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: _clearAutoBackupDir,
+            ),
+          ],
 
           const SizedBox(height: 28),
           const Divider(),
