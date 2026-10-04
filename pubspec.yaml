@@ -1,63 +1,74 @@
-name: receipt_app
-description: "برنامه مدیریت رسید، فاکتور و انبار"
-publish_to: 'none'
-version: 1.0.0+1
-
-environment:
-  sdk: '>=3.0.0 <4.0.0'
-
-dependencies:
-  flutter:
-    sdk: flutter
-  flutter_localizations:
-    sdk: flutter
-  cupertino_icons: ^1.0.6
-
-  # Database
-  sqflite: ^2.3.0
-  path: ^1.8.3
-  path_provider: ^2.1.1
-
-  # PDF generation & printing
-  pdf: ^3.10.7
-  printing: ^5.11.1
-
-  # File sharing (backup export only - no file picking, avoids Android SDK version conflicts)
-  share_plus: ^10.0.0
-
-  # Persian (Jalali) date support
-  shamsi_date: ^1.1.1
-  persian_datetime_picker: ^3.1.0
-
-  # Formatting numbers with thousands separators
-  intl: any
-
-  # ذخیره‌ی تنظیمات قالب فاکتور (جدا از دیتابیس)
-  shared_preferences: ^2.2.2
-
-  # Excel import (pure-Dart, no native Android code - safe from SDK version conflicts)
-  excel: ^4.0.6
-  file_picker: ^9.0.2
-  mobile_scanner: ^6.0.0
-  speech_to_text: ^7.0.0
-
-  # خواندن متن PDF برای ورود نرخ از فایل (آفلاین، بدون اینترنت)
-  pdfrx: ^2.3.4
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^3.0.1
-
-flutter:
-  uses-material-design: true
-  # فونت فارسی: فایل‌های زیر را در assets/fonts قرار دهید تا PDF فارسی درست رندر شود
-  # fonts:
-  #   - family: Vazirmatn
-  #     fonts:
-  #       - asset: assets/fonts/Vazirmatn-Regular.ttf
-  #       - asset: assets/fonts/Vazirmatn-Bold.ttf
-  #         weight: 700
-  assets:
-    - assets/
-    - assets/fonts/
+name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Persian OCR model files are in the repo
+        run: |
+          test -f assets/tessdata_config.json || { echo "MISSING assets/tessdata_config.json"; exit 1; }
+          test -f assets/tessdata/fas.traineddata || { echo "MISSING assets/tessdata/fas.traineddata"; exit 1; }
+          ls -l assets/tessdata
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Create android scaffold
+        run: flutter create --platforms=android --project-name receipt_app .
+      - name: Add RECORD_AUDIO permission for speech_to_text
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q 'RECORD_AUDIO' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.RECORD_AUDIO" />' "$MANIFEST"
+      - name: Get packages
+        run: flutter pub get
+      - name: Force compileSdk 36 everywhere
+        run: |
+          patch_gradle() {
+            f="$1"
+            if [ -f "$f" ]; then
+              sed -i -E 's/^([[:space:]]*)compileSdk(Version)?[[:space:]]+[0-9]+/\1compileSdk 36/' "$f"
+              sed -i -E 's/^([[:space:]]*)compileSdk[[:space:]]*=.*/\1compileSdk = 36/' "$f"
+            fi
+          }
+          patch_gradle android/app/build.gradle
+          patch_gradle android/app/build.gradle.kts
+          for dir in $(find ~/.pub-cache/hosted/pub.dev -maxdepth 1 -type d -name "*-*"); do
+            patch_gradle "$dir/android/build.gradle"
+            patch_gradle "$dir/android/build.gradle.kts"
+          done
+          echo "Patch step completed successfully"
+      - name: Patch pdfrx_engine nullable cache access
+        run: |
+          f=$(find ~/.pub-cache/hosted/pub.dev -path "*pdfrx_engine-*/lib/src/native/pdf_file_cache.dart" | head -n 1)
+          if [ -n "$f" ]; then
+            sed -i -e 's/\bcache\.blockSize/cache!.blockSize/g' -e 's/await cache\.read(/await cache!.read(/g' "$f"
+            echo "Patched $f"
+            grep -n "cache!" "$f" || { echo "PATCH DID NOT MATCH"; exit 1; }
+          else
+            echo "pdf_file_cache.dart not found"
+            exit 1
+          fi
+      - name: Print pdfrx_engine text API (diagnostic)
+        run: |
+          t=$(grep -rl "class PdfPageRawText" ~/.pub-cache/hosted/pub.dev/ --include=*.dart | head -n 1)
+          echo "FILE: $t"
+          grep -n -A25 "class PdfPageRawText" "$t" || true
+      - name: Build APK
+        run: flutter build apk --release
+      - name: Verify OCR model and native libs inside the APK
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          unzip -l "$APK" > apk_contents.txt
+          grep "tessdata" apk_contents.txt || true
+          grep -q "flutter_assets/assets/tessdata/fas.traineddata" apk_contents.txt || { echo "fas.traineddata is NOT inside the APK"; exit 1; }
+          grep -q "flutter_assets/assets/tessdata_config.json" apk_contents.txt || { echo "tessdata_config.json is NOT inside the APK"; exit 1; }
+          grep -E "lib(tesseract|lept|jpeg|png)" apk_contents.txt || echo "WARNING: no tesseract native lib names matched (check plugin libs)"
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipt-app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
