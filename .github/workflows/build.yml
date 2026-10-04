@@ -43,9 +43,16 @@ jobs:
           done
           echo "Patch step completed successfully"
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --no-shrink
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: receipt-app-release
           path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Build APK (debug, diagnostic)
+        run: flutter build apk --debug
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipt-app-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
