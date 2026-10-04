@@ -129,6 +129,7 @@ class RateTableMapper {
     if (has(['خودرو'])) return ColumnRole.vehicle;
     if (has(['دسته'])) return ColumnRole.category;
     if (has(['واحد'])) return ColumnRole.unit;
+    if (has(['خدمت', 'خدمات']) && !has(['قیمت', 'نرخ', 'مبلغ'])) return ColumnRole.title;
     if (has(['قیمت', 'نرخ', 'مبلغ', 'هزینه', 'اجرت', 'تومان', 'ریال'])) return ColumnRole.general;
     if (has(['خدمت', 'خدمات', 'شرح', 'عنوان', 'تعمیر', 'نام'])) return ColumnRole.title;
     return null;
