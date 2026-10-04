@@ -1,11 +1,13 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/rate_import_models.dart';
 import '../../models/service.dart';
 import '../../repositories/service_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
 import '../../services/rate_import/ocr_engine.dart';
+import '../../services/rate_import/offline_ocr_engine.dart';
 import '../../services/rate_import/rate_ocr_source.dart';
 import '../../services/rate_import/rate_pdf_source.dart';
 import '../../services/rate_import/rate_table_mapper.dart';
@@ -46,6 +48,7 @@ class _RateImportScreenState extends State<RateImportScreen> {
   String? _error;
   String? _ocrNote;
   bool _ocrNeedsAttention = false;
+  String? _pickedPath;
   int _idCounter = 0;
 
   bool get _isExcel => _kind == _FileKind.excel;
@@ -118,6 +121,7 @@ class _RateImportScreenState extends State<RateImportScreen> {
       _ocrNeedsAttention = false;
       _sheets = [];
       _kind = kind;
+      _pickedPath = path;
       _fileName = path.split(RegExp(r'[\\/]')).last;
     });
     try {
@@ -174,6 +178,42 @@ class _RateImportScreenState extends State<RateImportScreen> {
         });
       }
     }
+  }
+
+  Future<void> _diagnoseOcr() async {
+    final path = _pickedPath;
+    if (path == null) return;
+    setState(() {
+      _busy = true;
+      _status = 'در حال اجرای چند حالت OCR برای عیب‌یابی (ممکن است یک تا دو دقیقه طول بکشد)...';
+    });
+    String report;
+    try {
+      report = await OfflineOcrEngine().diagnose(path);
+    } catch (e) {
+      report = 'خطا: $e';
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _status = null;
+    });
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('خروجی خام OCR'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(report, textDirection: TextDirection.ltr, style: const TextStyle(fontSize: 11)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Clipboard.setData(ClipboardData(text: report)), child: const Text('کپی')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('بستن')),
+        ],
+      ),
+    );
   }
 
   Future<void> _buildPreview() async {
@@ -318,6 +358,15 @@ class _RateImportScreenState extends State<RateImportScreen> {
           label: Text(_fileName == null ? 'انتخاب فایل Excel، PDF یا تصویر' : 'فایل: $_fileName'),
           onPressed: _busy ? null : _pickFile,
         ),
+        if (_kind == _FileKind.image && _pickedPath != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TextButton.icon(
+              icon: const Icon(Icons.bug_report_outlined),
+              label: const Text('عیب‌یابی OCR (خروجی خام)'),
+              onPressed: _busy ? null : _diagnoseOcr,
+            ),
+          ),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(
