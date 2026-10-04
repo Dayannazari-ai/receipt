@@ -52,6 +52,20 @@ jobs:
             echo "pdf_file_cache.dart not found"
             exit 1
           fi
+      - name: Patch flutter_tesseract_ocr jcenter and print its Gradle files (diagnostic)
+        run: |
+          d=$(find ~/.pub-cache/hosted/pub.dev -maxdepth 1 -type d -name "flutter_tesseract_ocr-*" | head -n 1)
+          echo "DIR: $d"
+          echo "===== android/build.gradle BEFORE ====="
+          cat "$d/android/build.gradle"
+          sed -i 's/jcenter()/mavenCentral()/g' "$d/android/build.gradle"
+          echo "===== android/build.gradle AFTER ====="
+          cat "$d/android/build.gradle"
+          echo "===== android folder ====="
+          ls -la "$d/android"
+          cat "$d/android/settings.gradle" 2>/dev/null || true
+          echo "===== android/gradle.properties (app) ====="
+          cat android/gradle.properties
       - name: Print pdfrx_engine text API (diagnostic)
         run: |
           t=$(grep -rl "class PdfPageRawText" ~/.pub-cache/hosted/pub.dev/ --include=*.dart | head -n 1)
