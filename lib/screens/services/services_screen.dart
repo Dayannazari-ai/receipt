@@ -9,7 +9,6 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/thousands_input_formatter.dart';
 import '../../repositories/settings_repository.dart';
 import '../../models/app_settings.dart';
-import 'rate_import_screen.dart';
 
 class ServicesScreen extends StatefulWidget {
   const ServicesScreen({super.key});
@@ -177,15 +176,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('خدمات'), actions: [
         IconButton(icon: const Icon(Icons.create_new_folder_outlined), onPressed: _addCategory),
-        IconButton(
-          icon: const Icon(Icons.upload_file_outlined),
-          tooltip: 'ورود نرخ از فایل',
-          onPressed: () async {
-            await Navigator.push(context, MaterialPageRoute(builder: (_) => const RateImportScreen()));
-            if (!mounted) return;
-            _load();
-          },
-        ),
       ]),
       body: Column(children: [
         Padding(
