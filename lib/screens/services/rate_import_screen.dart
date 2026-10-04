@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/rate_import_models.dart';
 import '../../models/service.dart';
@@ -120,6 +121,76 @@ class _RateImportScreenState extends State<RateImportScreen> {
         });
       }
     }
+  }
+
+  /// گزارش عیب‌یابی: خروجی خام منبع (Excel/PDF)، نقش ستون‌های حدس‌زده‌شده
+  /// و نتیجهٔ استخراج. فقط می‌خواند؛ چیزی در برنامه یا دیتابیس تغییر نمی‌دهد.
+  String _diagnosticReport() {
+    final sb = StringBuffer();
+    String cut(String s) {
+      final t = s.replaceAll('\n', ' ').trim();
+      return t.length > 28 ? '${t.substring(0, 28)}…' : t;
+    }
+
+    String fmt(double? v) => v == null ? '' : v.round().toString();
+
+    sb.writeln('file: ${_fileName ?? ''} | type: ${_isPdf ? 'pdf' : 'excel'} | tables: ${_sheets.length}');
+    for (var i = 0; i < _sheets.length; i++) {
+      final s = _sheets[i];
+      final t = s.table;
+      final m = s.mapping;
+      var maxLen = 0;
+      var minLen = 1 << 30;
+      for (final r in t.rows) {
+        if (r.length > maxLen) maxLen = r.length;
+        if (r.length < minLen) minLen = r.length;
+      }
+      sb.writeln('');
+      sb.writeln(
+          '=== [${i + 1}] ${t.name} | rows=${t.rows.length} | cols=$maxLen (min $minLen) | headerRow=${m.headerRow + 1} | enabled=${s.enabled} | fillDown=${m.fillDown}');
+      sb.writeln('roles: ${m.columns.map((c) => '#${c.index + 1}[${cut(c.header)}]=${c.role.name}').join('  ')}');
+      sb.writeln('-- raw rows (first 12):');
+      for (var r = 0; r < t.rows.length && r < 12; r++) {
+        sb.writeln('${r + 1}: ${t.rows[r].map(cut).join(' | ')}');
+      }
+      if (t.rows.length > 15) {
+        sb.writeln('-- raw rows (last 3):');
+        for (var r = t.rows.length - 3; r < t.rows.length; r++) {
+          sb.writeln('${r + 1}: ${t.rows[r].map(cut).join(' | ')}');
+        }
+      }
+      try {
+        var n = 0;
+        final res = _mapper.extract(t, m, nextId: () => ++n);
+        sb.writeln('-- extract: rows=${res.rows.length} noTitle=${res.skippedNoTitle} noPrice=${res.skippedNoPrice}');
+        for (final r in res.rows.take(10)) {
+          sb.writeln('title=${cut(r.title)} | brand=${r.brandText ?? ''} | model=${r.modelText ?? ''} | veh=${r.vehicleText ?? ''} | type=${r.type ?? ''} | yr=${r.year ?? ''} | g=${fmt(r.general)} min=${fmt(r.minApproved)} neg=${fmt(r.negotiated)} sp=${fmt(r.special)} | unit=${r.unit ?? ''} | flags=${r.extractionFlags.join(';')} | ${r.sourceLabel}');
+        }
+      } catch (e) {
+        sb.writeln('extract error: $e');
+      }
+    }
+    return sb.toString();
+  }
+
+  Future<void> _showDiagnostic() async {
+    final report = _diagnosticReport();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('گزارش عیب‌یابی'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(report, textDirection: TextDirection.ltr, style: const TextStyle(fontSize: 11)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Clipboard.setData(ClipboardData(text: report)), child: const Text('کپی')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('بستن')),
+        ],
+      ),
+    );
   }
 
   Future<void> _buildPreview() async {
@@ -264,6 +335,15 @@ class _RateImportScreenState extends State<RateImportScreen> {
           label: Text(_fileName == null ? 'انتخاب فایل Excel یا PDF' : 'فایل: $_fileName'),
           onPressed: _busy ? null : _pickFile,
         ),
+        if (_sheets.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TextButton.icon(
+              icon: const Icon(Icons.bug_report_outlined),
+              label: const Text('عیب‌یابی خروجی (خام)'),
+              onPressed: _busy ? null : _showDiagnostic,
+            ),
+          ),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(
