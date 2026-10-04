@@ -1,14 +1,10 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../models/rate_import_models.dart';
 import '../../models/service.dart';
 import '../../repositories/service_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
-import '../../services/rate_import/ocr_engine.dart';
-import '../../services/rate_import/offline_ocr_engine.dart';
-import '../../services/rate_import/rate_ocr_source.dart';
 import '../../services/rate_import/rate_pdf_source.dart';
 import '../../services/rate_import/rate_table_mapper.dart';
 import '../../services/rate_import/rate_table_source.dart';
@@ -28,30 +24,22 @@ class _SheetCfg {
   bool enabled;
 }
 
-enum _FileKind { excel, pdf, image }
-
 class _RateImportScreenState extends State<RateImportScreen> {
   final _categoryRepo = ServiceCategoryRepository();
   final _vehicleRepo = VehicleReferenceRepository();
   final RateTableSource _excelSource = ExcelRateTableSource();
   final RateTableSource _pdfSource = PdfRateTableSource();
-  final OcrRateTableSource _ocrSource = OcrRateTableSource();
 
   List<ServiceCategory> _categories = [];
   int? _categoryId;
   String? _fileName;
-  _FileKind _kind = _FileKind.excel;
+  bool _isPdf = false;
   List<_SheetCfg> _sheets = [];
   RateTableMapper _mapper = RateTableMapper();
   bool _busy = false;
   String? _status;
   String? _error;
-  String? _ocrNote;
-  bool _ocrNeedsAttention = false;
-  String? _pickedPath;
   int _idCounter = 0;
-
-  bool get _isExcel => _kind == _FileKind.excel;
 
   @override
   void initState() {
@@ -94,60 +82,25 @@ class _RateImportScreenState extends State<RateImportScreen> {
     }
   }
 
-  _FileKind _kindOf(String path) {
-    final p = path.toLowerCase();
-    if (p.endsWith('.pdf')) return _FileKind.pdf;
-    if (p.endsWith('.xlsx')) return _FileKind.excel;
-    return _FileKind.image;
-  }
-
   Future<void> _pickFile() async {
-    final res = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['xlsx', 'pdf', 'jpg', 'jpeg', 'png', 'webp'],
-    );
+    final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx', 'pdf']);
     final path = res?.files.single.path;
     if (path == null) return;
-    final kind = _kindOf(path);
+    final pdf = path.toLowerCase().endsWith('.pdf');
     setState(() {
       _busy = true;
-      _status = switch (kind) {
-        _FileKind.pdf => 'در حال خواندن PDF (ممکن است چند ثانیه طول بکشد)...',
-        _FileKind.image => 'در حال خواندن تصویر با OCR آفلاین (ممکن است چند ده ثانیه طول بکشد)...',
-        _FileKind.excel => 'در حال خواندن فایل...',
-      };
+      _status = pdf ? 'در حال خواندن PDF (ممکن است چند ثانیه طول بکشد)...' : 'در حال خواندن فایل...';
       _error = null;
-      _ocrNote = null;
-      _ocrNeedsAttention = false;
       _sheets = [];
-      _kind = kind;
-      _pickedPath = path;
+      _isPdf = pdf;
       _fileName = path.split(RegExp(r'[\\/]')).last;
     });
     try {
-      final RateTableSource source = switch (kind) {
-        _FileKind.pdf => _pdfSource,
-        _FileKind.image => _ocrSource,
-        _FileKind.excel => _excelSource,
-      };
-      final tables = await source.read(path);
+      final tables = await (pdf ? _pdfSource : _excelSource).read(path);
       final usable = tables.where((t) => t.rows.length >= 2).toList();
       if (!mounted) return;
-      if (kind == _FileKind.image) {
-        final rep = _ocrSource.lastReport;
-        if (rep != null) {
-          setState(() {
-            _ocrNote = rep.summary;
-            _ocrNeedsAttention = rep.needsAttention;
-          });
-        }
-      }
       if (usable.isEmpty) {
-        setState(() => _error = switch (kind) {
-              _FileKind.pdf => 'در PDF جدولی با داده پیدا نشد.',
-              _FileKind.image => 'در تصویر جدولی با داده پیدا نشد.',
-              _FileKind.excel => 'فایل خالی است یا شیتی با داده پیدا نشد.',
-            });
+        setState(() => _error = pdf ? 'در PDF جدولی با داده پیدا نشد.' : 'فایل خالی است یا شیتی با داده پیدا نشد.');
         return;
       }
       final cfgs = usable.map((t) {
@@ -157,18 +110,7 @@ class _RateImportScreenState extends State<RateImportScreen> {
       setState(() => _sheets = cfgs);
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _error = e is ScannedPdfException
-              ? e.message
-              : e is OcrException
-                  ? e.message
-                  : 'خطا در خواندن فایل: $e';
-          final rep = _ocrSource.lastReport;
-          if (kind == _FileKind.image && rep != null) {
-            _ocrNote = rep.summary;
-            _ocrNeedsAttention = rep.needsAttention;
-          }
-        });
+        setState(() => _error = e is ScannedPdfException ? e.message : 'خطا در خواندن فایل: $e');
       }
     } finally {
       if (mounted) {
@@ -180,46 +122,10 @@ class _RateImportScreenState extends State<RateImportScreen> {
     }
   }
 
-  Future<void> _diagnoseOcr() async {
-    final path = _pickedPath;
-    if (path == null) return;
-    setState(() {
-      _busy = true;
-      _status = 'در حال اجرای چند حالت OCR برای عیب‌یابی (ممکن است یک تا دو دقیقه طول بکشد)...';
-    });
-    String report;
-    try {
-      report = await OfflineOcrEngine().diagnose(path);
-    } catch (e) {
-      report = 'خطا: $e';
-    }
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _status = null;
-    });
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('خروجی خام OCR'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: SelectableText(report, textDirection: TextDirection.ltr, style: const TextStyle(fontSize: 11)),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Clipboard.setData(ClipboardData(text: report)), child: const Text('کپی')),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('بستن')),
-        ],
-      ),
-    );
-  }
-
   Future<void> _buildPreview() async {
     final enabled = _sheets.where((s) => s.enabled).toList();
     if (enabled.isEmpty) {
-      setState(() => _error = _isExcel ? 'حداقل یک شیت را انتخاب کنید.' : 'حداقل یک جدول را انتخاب کنید.');
+      setState(() => _error = _isPdf ? 'حداقل یک جدول را انتخاب کنید.' : 'حداقل یک شیت را انتخاب کنید.');
       return;
     }
     for (final s in enabled) {
@@ -347,7 +253,7 @@ class _RateImportScreenState extends State<RateImportScreen> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
           child: const Text(
-            'فایل Excel (xlsx)، PDF متنی یا عکس/اسکرین‌شات نرخنامه را انتخاب کنید. نقش هر ستون به‌صورت خودکار حدس زده می‌شود و می‌توانید اصلاحش کنید. '
+            'فایل Excel (xlsx) یا PDF متنی را انتخاب کنید. نقش هر ستون به‌صورت خودکار حدس زده می‌شود و می‌توانید اصلاحش کنید. '
             'هیچ نرخی بدون بررسی و تأیید نهایی شما ثبت نمی‌شود.',
             style: TextStyle(fontSize: 12),
           ),
@@ -355,18 +261,9 @@ class _RateImportScreenState extends State<RateImportScreen> {
         const SizedBox(height: 16),
         OutlinedButton.icon(
           icon: const Icon(Icons.table_chart_outlined),
-          label: Text(_fileName == null ? 'انتخاب فایل Excel، PDF یا تصویر' : 'فایل: $_fileName'),
+          label: Text(_fileName == null ? 'انتخاب فایل Excel یا PDF' : 'فایل: $_fileName'),
           onPressed: _busy ? null : _pickFile,
         ),
-        if (_kind == _FileKind.image && _pickedPath != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: TextButton.icon(
-              icon: const Icon(Icons.bug_report_outlined),
-              label: const Text('عیب‌یابی OCR (خروجی خام)'),
-              onPressed: _busy ? null : _diagnoseOcr,
-            ),
-          ),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(
@@ -387,24 +284,13 @@ class _RateImportScreenState extends State<RateImportScreen> {
             Expanded(child: Text(_status ?? 'در حال پردازش...')),
           ]),
         ],
-        if (_ocrNote != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _ocrNeedsAttention ? Colors.orange.shade50 : Colors.green.shade50,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(_ocrNote!, style: const TextStyle(fontSize: 12)),
-          ),
-        ],
         if (_error != null) ...[
           const SizedBox(height: 12),
           Text(_error!, style: const TextStyle(color: Colors.red)),
         ],
         if (_sheets.isNotEmpty) ...[
           const SizedBox(height: 16),
-          Text(_isExcel ? 'شیت‌ها و ستون‌ها' : 'جدول‌ها و ستون‌ها', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(_isPdf ? 'جدول‌ها و ستون‌ها' : 'شیت‌ها و ستون‌ها', style: const TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           ..._sheets.map(_sheetTile),
           const SizedBox(height: 16),
