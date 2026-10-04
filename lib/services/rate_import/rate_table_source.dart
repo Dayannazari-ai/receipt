@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:excel/excel.dart';
+import 'package:excel_plus/excel_plus.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../models/rate_import_models.dart';
@@ -18,6 +18,15 @@ class ExcelRateTableSource implements RateTableSource {
   Future<List<RawTable>> read(String path) => compute(_readExcelSync, path);
 }
 
+/// متن سلول. برای سلول‌های فرمول‌دار، نتیجهٔ محاسبه‌شده‌ای که خود Excel در فایل ذخیره کرده
+/// خوانده می‌شود (همان عددی که در Excel دیده می‌شود)، نه متن فرمول.
+String _cellText(Data? d) {
+  final v = d?.value;
+  if (v == null) return '';
+  if (v is FormulaCellValue) return (v.cachedValue ?? '').trim();
+  return v.toString().trim();
+}
+
 List<RawTable> _readExcelSync(String path) {
   final bytes = File(path).readAsBytesSync();
   final excel = Excel.decodeBytes(bytes);
@@ -27,7 +36,7 @@ List<RawTable> _readExcelSync(String path) {
     final rows = <List<String>>[];
     for (var r = 0; r < sheet.maxRows; r++) {
       final row = sheet.row(r);
-      rows.add(row.map((d) => d?.value?.toString().trim() ?? '').toList());
+      rows.add(row.map(_cellText).toList());
     }
     while (rows.isNotEmpty && rows.last.every((c) => c.isEmpty)) {
       rows.removeLast();
