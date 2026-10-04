@@ -5,6 +5,7 @@ version: 1.0.0+1
 
 environment:
   sdk: ^3.0.0
+
 dependencies:
   flutter:
     sdk: flutter
@@ -43,9 +44,6 @@ dependencies:
   # خواندن متن PDF برای ورود نرخ از فایل (آفلاین، بدون اینترنت)
   pdfrx: ^2.3.4
 
-  # OCR آفلاین (Tesseract) برای ورود نرخ از عکس. مدل فارسی: assets/tessdata/fas.traineddata
-  flutter_tesseract_ocr: ^0.4.30
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -63,4 +61,3 @@ flutter:
   assets:
     - assets/
     - assets/fonts/
-    - assets/tessdata/
