@@ -5,6 +5,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check Persian OCR model files are in the repo
+        run: |
+          test -f assets/tessdata_config.json || { echo "MISSING assets/tessdata_config.json"; exit 1; }
+          test -f assets/tessdata/fas.traineddata || { echo "MISSING assets/tessdata/fas.traineddata"; exit 1; }
+          ls -l assets/tessdata
       - uses: actions/setup-java@v4
         with:
           distribution: zulu
@@ -54,6 +59,14 @@ jobs:
           grep -n -A25 "class PdfPageRawText" "$t" || true
       - name: Build APK
         run: flutter build apk --release
+      - name: Verify OCR model and native libs inside the APK
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          unzip -l "$APK" > apk_contents.txt
+          grep "tessdata" apk_contents.txt || true
+          grep -q "flutter_assets/assets/tessdata/fas.traineddata" apk_contents.txt || { echo "fas.traineddata is NOT inside the APK"; exit 1; }
+          grep -q "flutter_assets/assets/tessdata_config.json" apk_contents.txt || { echo "tessdata_config.json is NOT inside the APK"; exit 1; }
+          grep -E "lib(tesseract|lept|jpeg|png)" apk_contents.txt || echo "WARNING: no tesseract native lib names matched (check plugin libs)"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
