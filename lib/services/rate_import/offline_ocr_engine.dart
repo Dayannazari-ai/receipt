@@ -52,6 +52,49 @@ class OfflineOcrEngine implements OcrEngine {
     }
   }
 
+  /// فقط برای عیب‌یابی: چند حالت OCR را روی همان تصویر اجرا می‌کند و گزارش متنی خام می‌دهد
+  /// (متن | اطمینان | موقعیت چپ,بالا). مسیر عادیِ ورود نرخ را تغییر نمی‌دهد.
+  Future<String> diagnose(String imagePath) async {
+    final sb = StringBuffer();
+    String? prepared;
+    try {
+      prepared = await _preprocess(imagePath);
+    } catch (e) {
+      sb.writeln('پیش‌پردازش ناموفق: $e');
+    }
+    final variants = <(String, String, int)>[
+      if (prepared != null) ('preprocessed', prepared, 6),
+      if (prepared != null) ('preprocessed', prepared, 11),
+      if (prepared != null) ('preprocessed', prepared, 4),
+      ('original', imagePath, 6),
+    ];
+    for (final v in variants) {
+      sb.writeln('=== ${v.$1} / psm ${v.$3} ===');
+      try {
+        final hocr = await FlutterTesseractOcr.extractHocr(
+          v.$2,
+          language: language,
+          args: {'psm': '${v.$3}', 'preserve_interword_spaces': '1'},
+        );
+        final page = parseHocr(hocr);
+        final confs = [for (final w in page.words) if (w.confidence >= 0) w.confidence];
+        final avg = confs.isEmpty ? -1 : confs.reduce((a, b) => a + b) / confs.length;
+        sb.writeln('size=${page.width.round()}x${page.height.round()} words=${page.words.length} avgConf=${avg.round()}');
+        for (final w in page.words.take(120)) {
+          sb.writeln('${w.text} | ${w.confidence.round()} | ${w.left.round()},${w.top.round()}');
+        }
+      } catch (e) {
+        sb.writeln('خطا: $e');
+      }
+    }
+    if (prepared != null) {
+      try {
+        await File(prepared).delete();
+      } catch (_) {}
+    }
+    return sb.toString();
+  }
+
   /// خاکستری، کمی کنتراست بیشتر، سفید کردن زمینهٔ شفاف و بزرگ‌کردن تصاویر کوچک
   /// (فقط با dart:ui؛ بدون پکیج اضافه تا با بقیهٔ وابستگی‌ها تداخل نکند).
   Future<String> _preprocess(String path) async {
