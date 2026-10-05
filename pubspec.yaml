@@ -40,6 +40,8 @@ dependencies:
   file_picker: ^9.0.2
   mobile_scanner: ^6.0.0
   speech_to_text: ^7.0.0
+  # مجوز «دسترسی به همه‌ی فایل‌ها» برای پشتیبان خودکار در حافظه‌ی داخلی
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:
