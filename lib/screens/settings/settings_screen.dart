@@ -456,8 +456,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           OutlinedButton.icon(
             icon: const Icon(Icons.backup_outlined),
             label: const Text('پشتیبان‌گیری و بازیابی'),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const BackupRestoreScreen())),
+            onPressed: () async {
+              await Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const BackupRestoreScreen()));
+              if (mounted) _load();
+            },
           ),
 
           const SizedBox(height: 28),
