@@ -3,6 +3,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
+import '../database/database_helper.dart';
 import '../models/backup_models.dart';
 import 'backup_service.dart';
 
@@ -44,6 +46,23 @@ class AutoBackupService {
   Future<void> clearBackupDir() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_dirKey);
+  }
+
+  /// آیا برنامه کاملاً خالی است؟ (هیچ مشتری، کالا و فاکتوری در دیتابیس نیست.)
+  /// برای هشدار قبل از گرفتن پشتیبانِ خالی، مثلاً بعد از نصب تازه و قبل از
+  /// بازیابی. تعداد همه‌ی ردیف‌ها شمرده می‌شود (حتی حذف‌منطقی‌شده‌ها). اگر
+  /// بررسی ممکن نشد، false برمی‌گرداند تا هشدار بی‌جا نمایش داده نشود.
+  Future<bool> isAppDataEmpty() async {
+    try {
+      final db = await DatabaseHelper.instance.database;
+      for (final t in const ['customers', 'products', 'invoices']) {
+        final n = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
+        if (n > 0) return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// مجوز دسترسی به فایل‌ها برای نوشتن در حافظه‌ی داخلی.
