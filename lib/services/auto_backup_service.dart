@@ -24,8 +24,8 @@ class AutoBackupException implements Exception {
 ///   چون مخصوص همین دستگاه است و نباید وارد بکاپ/بازیابی تنظیمات شود.
 /// - ابتدا فایل موقت (.tmp) ساخته و اعتبارسنجی می‌شود، بعد به نام نهایی
 ///   منتقل می‌شود. فقط بعد از موفقیت کامل پشتیبان جدید، پشتیبان‌های
-///   خودکار قبلی (AutoBackup_*) از همان پوشه حذف می‌شوند تا فقط آخرین بماند؛
-///   اگر پشتیبان جدید ناموفق باشد هیچ فایل قبلی حذف نمی‌شود.
+///   خودکار قدیمی (AutoBackup_*) از همان پوشه حذف می‌شوند و ۳ پشتیبان آخر
+///   می‌مانند؛ اگر پشتیبان جدید ناموفق باشد هیچ فایل قبلی حذف نمی‌شود.
 /// - برای نوشتن در حافظه‌ی داخلی گوشی (اندروید ۱۱ به بالا) مجوز
 ///   «دسترسی به همه‌ی فایل‌ها» لازم است؛ هنگام تعیین مسیر در صورت نیاز
 ///   درخواست می‌شود.
@@ -116,20 +116,36 @@ class AutoBackupService {
     return name;
   }
 
-  /// حذف پشتیبان‌های خودکار قبلی؛ فقط فایل‌هایی که نامشان AutoBackup_* و
-  /// پسوند پشتیبان کامل است (و .tmp های باقی‌مانده‌شان). فایل تازه و هر فایل
-  /// دیگری در پوشه دست‌نخورده می‌ماند. شکست در حذف، پشتیبان تازه را خراب نمی‌کند.
+  /// تعداد پشتیبان‌های خودکاری که نگه داشته می‌شوند (جدیدترین‌ها).
+  static const int _keepCount = 3;
+
+  /// حذف پشتیبان‌های خودکار قدیمی؛ فقط فایل‌هایی که نامشان AutoBackup_* و
+  /// پسوند پشتیبان کامل است. ۳ فایل جدیدتر (بر اساس تاریخ داخل نام فایل)
+  /// دست‌نخورده می‌مانند، فایل تازه هرگز حذف نمی‌شود، و فایل‌های موقت .tmp
+  /// باقی‌مانده پاک می‌شوند. هر فایل دیگری در پوشه دست‌نخورده می‌ماند.
+  /// شکست در حذف، پشتیبان تازه را خراب نمی‌کند.
   Future<void> _deleteOldAutoBackups(String dir, String keepName) async {
     final ext = BackupType.full.fileExtension;
     try {
+      final backups = <File>[];
       await for (final e in Directory(dir).list(followLinks: false)) {
         if (e is! File) continue;
         final n = p.basename(e.path);
-        if (n == keepName) continue;
-        final isOld = n.startsWith('AutoBackup_') && (n.endsWith('.$ext') || n.endsWith('.$ext.tmp'));
-        if (!isOld) continue;
+        if (!n.startsWith('AutoBackup_')) continue;
+        if (n.endsWith('.$ext.tmp')) {
+          try {
+            await e.delete();
+          } catch (_) {}
+          continue;
+        }
+        if (n.endsWith('.$ext')) backups.add(e);
+      }
+      // نام فایل شامل تاریخ و ساعت است؛ مرتب‌سازی نزولی = جدیدترین اول.
+      backups.sort((a, b) => p.basename(b.path).compareTo(p.basename(a.path)));
+      for (final f in backups.skip(_keepCount)) {
+        if (p.basename(f.path) == keepName) continue;
         try {
-          await e.delete();
+          await f.delete();
         } catch (_) {}
       }
     } catch (_) {}
