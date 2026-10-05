@@ -24,6 +24,15 @@ jobs:
           grep -q 'android.permission.CAMERA' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
           echo "---- manifest permissions ----"
           grep 'uses-permission' "$MANIFEST"
+      - name: Add storage permissions for backup folder access
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q 'MANAGE_EXTERNAL_STORAGE' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />' "$MANIFEST"
+          grep -q 'WRITE_EXTERNAL_STORAGE' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />' "$MANIFEST"
+          grep -q 'READ_EXTERNAL_STORAGE' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />' "$MANIFEST"
+          grep -q 'requestLegacyExternalStorage' "$MANIFEST" || sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' "$MANIFEST"
+          echo "---- manifest storage lines ----"
+          grep -E 'EXTERNAL_STORAGE|requestLegacy' "$MANIFEST"
       - name: Get packages
         run: flutter pub get
       - name: Force compileSdk 36 everywhere
