@@ -7,6 +7,37 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import 'product_form_screen.dart';
 
+/// تبدیل ارقام فارسی/عربی به انگلیسی فقط برای مقایسهٔ کدها در مرتب‌سازی.
+String _normDigits(String s) {
+  final b = StringBuffer();
+  for (final r in s.runes) {
+    if (r >= 0x06F0 && r <= 0x06F9) {
+      b.writeCharCode(r - 0x06F0 + 0x30);
+    } else if (r >= 0x0660 && r <= 0x0669) {
+      b.writeCharCode(r - 0x0660 + 0x30);
+    } else {
+      b.writeCharCode(r);
+    }
+  }
+  return b.toString();
+}
+
+/// مقایسهٔ کدها: کدهای عددی به‌صورت عددی (۲ قبل از ۱۰)، سپس متنی.
+int _compareCodes(String a, String b) {
+  final na = _normDigits(a.trim());
+  final nb = _normDigits(b.trim());
+  final ia = int.tryParse(na);
+  final ib = int.tryParse(nb);
+  if (ia != null && ib != null) {
+    final c = ia.compareTo(ib);
+    if (c != 0) return c;
+    return 0;
+  }
+  if (ia != null) return -1;
+  if (ib != null) return 1;
+  return na.compareTo(nb);
+}
+
 class ProductsScreen extends StatefulWidget {
   const ProductsScreen({super.key});
   @override
@@ -21,11 +52,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Currency _currency = Currency.toman;
   bool _lowStockOnly = false;
   bool _loading = true;
+  String _sortBy = 'name'; // 'name' یا 'code'
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  List<Product> _sorted(List<Product> src) {
+    final l = List<Product>.of(src);
+    l.sort((a, b) {
+      if (_sortBy == 'code') {
+        final c = _compareCodes(a.code, b.code);
+        if (c != 0) return c;
+      }
+      return a.name.compareTo(b.name);
+    });
+    return l;
   }
 
   Future<void> _load() async {
@@ -37,7 +81,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final settings = await _settingsRepo.getSettings();
     if (!mounted) return;
     setState(() {
-      _products = list;
+      _products = _sorted(list);
       _currency = settings.currency;
       _loading = false;
     });
@@ -95,6 +139,28 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('انبار کالا'), actions: [
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.sort),
+          tooltip: 'مرتب‌سازی',
+          onSelected: (v) {
+            setState(() {
+              _sortBy = v;
+              _products = _sorted(_products);
+            });
+          },
+          itemBuilder: (_) => [
+            CheckedPopupMenuItem<String>(
+              value: 'name',
+              checked: _sortBy == 'name',
+              child: const Text('بر اساس نام'),
+            ),
+            CheckedPopupMenuItem<String>(
+              value: 'code',
+              checked: _sortBy == 'code',
+              child: const Text('بر اساس کد'),
+            ),
+          ],
+        ),
         IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
       ]),
       body: Column(children: [
@@ -130,6 +196,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       itemCount: _products.length,
                       itemBuilder: (context, i) {
                         final p = _products[i];
+                        final codePrefix = _sortBy == 'code' ? 'کد: ${p.code} - ' : '';
                         return GestureDetector(
                           onLongPress: () => _showProductActions(p),
                           child: Card(
@@ -140,7 +207,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                   child: Icon(p.isLowStock ? Icons.warning_amber : Icons.inventory_2_outlined)),
                               title: Text(p.name),
                               subtitle: Text(
-                                  'موجودی: ${PersianDateUtil.toPersianDigits('${p.stock}')}'
+                                  '${codePrefix}موجودی: ${PersianDateUtil.toPersianDigits('${p.stock}')}'
                                   '${p.barcode != null ? ' - بارکد: ${p.barcode}' : ''}'),
                               trailing: Text(CurrencyFormatter.format(p.sellPrice, _currency)),
                               onTap: () => _openForm(product: p),
