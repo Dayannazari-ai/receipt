@@ -10,6 +10,9 @@ import 'settings/settings_screen.dart';
 
 enum _FailAction { cancel, retry, changePath }
 
+/// انتخاب کاربر در هشدار «برنامه خالی است».
+enum _EmptyAction { stay, exitOnly, backupAndExit }
+
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -52,7 +55,47 @@ class _HomeShellState extends State<HomeShell> {
     return false;
   }
 
+  /// هشدار وقتی برنامه کاملاً خالی است (مثلاً بعد از نصب تازه و قبل از
+  /// بازیابی): پشتیبان خالی ممکن است پشتیبان‌های سالم قبلی را جایگزین کند.
+  Future<_EmptyAction?> _showEmptyDataWarning() {
+    return showDialog<_EmptyAction>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('هشدار: برنامه خالی است'),
+        content: const Text(
+            'در برنامه هنوز هیچ مشتری، کالا یا فاکتوری ثبت نشده است.\n\n'
+            'اگر الان پشتیبان‌گیری کنید، از اطلاعات خالی پشتیبان گرفته می‌شود و ممکن است '
+            'پشتیبان‌های سالم قبلی شما جایگزین شوند.\n\n'
+            'اگر قبلاً پشتیبان دارید، اول آن را از «تنظیمات ← پشتیبان‌گیری و بازیابی» '
+            'بازیابی کنید و بعد خارج شوید.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, _EmptyAction.stay), child: const Text('ماندن در برنامه')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, _EmptyAction.exitOnly),
+              child: const Text('خروج بدون پشتیبان‌گیری')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, _EmptyAction.backupAndExit),
+              child: const Text('پشتیبان‌گیری و خروج', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+  }
+
   Future<void> _confirmExit() async {
+    if (await _autoBackup.isAppDataEmpty()) {
+      if (!mounted) return;
+      final choice = await _showEmptyDataWarning();
+      if (!mounted) return;
+      if (choice == null || choice == _EmptyAction.stay) return;
+      if (choice == _EmptyAction.exitOnly) {
+        await SystemNavigator.pop(); // بدون ساخت پشتیبان خالی
+        return;
+      }
+      await _backupAndExit(); // کاربر آگاهانه پشتیبان خالی را خواسته
+      return;
+    }
+
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
