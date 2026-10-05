@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/backup_models.dart';
 import 'backup_service.dart';
@@ -22,7 +23,12 @@ class AutoBackupException implements Exception {
 /// - مسیر پوشه در shared_preferences ذخیره می‌شود، نه در جدول settings؛
 ///   چون مخصوص همین دستگاه است و نباید وارد بکاپ/بازیابی تنظیمات شود.
 /// - ابتدا فایل موقت (.tmp) ساخته و اعتبارسنجی می‌شود، بعد به نام نهایی
-///   منتقل می‌شود. بکاپ‌های قبلی هرگز حذف یا بازنویسی نمی‌شوند.
+///   منتقل می‌شود. فقط بعد از موفقیت کامل پشتیبان جدید، پشتیبان‌های
+///   خودکار قبلی (AutoBackup_*) از همان پوشه حذف می‌شوند تا فقط آخرین بماند؛
+///   اگر پشتیبان جدید ناموفق باشد هیچ فایل قبلی حذف نمی‌شود.
+/// - برای نوشتن در حافظه‌ی داخلی گوشی (اندروید ۱۱ به بالا) مجوز
+///   «دسترسی به همه‌ی فایل‌ها» لازم است؛ هنگام تعیین مسیر در صورت نیاز
+///   درخواست می‌شود.
 class AutoBackupService {
   static const _dirKey = 'auto_backup_dir';
   static bool _running = false; // قفل ضد اجرای هم‌زمان
@@ -40,13 +46,37 @@ class AutoBackupService {
     await prefs.remove(_dirKey);
   }
 
+  /// مجوز دسترسی به فایل‌ها برای نوشتن در حافظه‌ی داخلی.
+  /// اندروید ۱۱+: «دسترسی به همه‌ی فایل‌ها» (صفحه‌ی تنظیمات سیستم باز می‌شود).
+  /// اندروید ۱۰ و پایین‌تر: مجوز معمولی حافظه.
+  Future<bool> _ensureStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      if (await Permission.manageExternalStorage.isGranted) return true;
+      if ((await Permission.manageExternalStorage.request()).isGranted) return true;
+      return (await Permission.storage.request()).isGranted;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// انتخاب پوشه توسط کاربر. فقط اگر واقعاً قابل نوشتن بود ذخیره می‌شود.
   /// خروجی: مسیر ذخیره‌شده، یا null اگر کاربر انصراف داد.
   /// اگر پوشه قابل استفاده نبود، AutoBackupException پرتاب می‌شود.
   Future<String?> chooseAndSaveDir() async {
     final dir = await FilePicker.platform.getDirectoryPath();
     if (dir == null || dir.trim().isEmpty) return null;
-    final err = await _checkWritable(dir);
+    var err = await _checkWritable(dir);
+    if (err != null) {
+      // نوشتن ممکن نبود؛ احتمالاً مجوز «دسترسی به همه‌ی فایل‌ها» لازم است.
+      final granted = await _ensureStoragePermission();
+      if (granted) {
+        err = await _checkWritable(dir);
+      } else {
+        err = '$err\n\nبرای ذخیره در حافظه‌ی داخلی، مجوز «دسترسی به همه‌ی فایل‌ها» '
+            'را برای برنامه روشن کنید و دوباره مسیر را انتخاب کنید.';
+      }
+    }
     if (err != null) throw AutoBackupException(err, pathProblem: true);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_dirKey, dir);
@@ -63,8 +93,11 @@ class AutoBackupService {
       await probe.delete();
       if (back != 'ok') return 'نوشتن در این پوشه درست انجام نشد.';
       return null;
-    } catch (_) {
-      return 'امکان نوشتن در این پوشه نیست (دسترسی ندارد). پوشه‌ی دیگری انتخاب کنید.';
+    } catch (e) {
+      var detail = '$e'.replaceAll('\n', ' ');
+      if (detail.length > 140) detail = detail.substring(0, 140);
+      return 'امکان نوشتن در این پوشه نیست (دسترسی ندارد). پوشه‌ی دیگری انتخاب کنید.\n'
+          '(جزئیات: $detail)';
     }
   }
 
@@ -81,6 +114,25 @@ class AutoBackupService {
       i++;
     }
     return name;
+  }
+
+  /// حذف پشتیبان‌های خودکار قبلی؛ فقط فایل‌هایی که نامشان AutoBackup_* و
+  /// پسوند پشتیبان کامل است (و .tmp های باقی‌مانده‌شان). فایل تازه و هر فایل
+  /// دیگری در پوشه دست‌نخورده می‌ماند. شکست در حذف، پشتیبان تازه را خراب نمی‌کند.
+  Future<void> _deleteOldAutoBackups(String dir, String keepName) async {
+    final ext = BackupType.full.fileExtension;
+    try {
+      await for (final e in Directory(dir).list(followLinks: false)) {
+        if (e is! File) continue;
+        final n = p.basename(e.path);
+        if (n == keepName) continue;
+        final isOld = n.startsWith('AutoBackup_') && (n.endsWith('.$ext') || n.endsWith('.$ext.tmp'));
+        if (!isOld) continue;
+        try {
+          await e.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   /// اجرای پشتیبان‌گیری. در صورت موفقیت فایل نهایی را برمی‌گرداند؛
@@ -121,6 +173,7 @@ class AutoBackupService {
       final finalFile = File(p.join(dir, name));
       await tmp.rename(finalFile.path);
       tmp = null; // منتقل شد؛ دیگر چیزی برای پاک‌کردن نیست
+      await _deleteOldAutoBackups(dir, name); // فقط بعد از موفقیت کامل
       return finalFile;
     } on AutoBackupException {
       rethrow;
