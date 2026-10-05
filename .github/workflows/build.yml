@@ -57,7 +57,8 @@ jobs:
       - name: Build APK
         run: flutter build apk --release --no-shrink --build-number=${{ github.run_number }}
       - name: Check R8 mapping (diagnostic)
-        run: ls -la build/app/outputs/mapping/release 2>&1 || echo "no mapping dir: R8 did not run"
+        run: |
+          ls -la build/app/outputs/mapping/release 2>&1 || echo "no mapping dir - R8 did not run"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
