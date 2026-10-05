@@ -10,6 +10,37 @@ import '../../utils/thousands_input_formatter.dart';
 import '../../repositories/settings_repository.dart';
 import '../../models/app_settings.dart';
 
+/// تبدیل ارقام فارسی/عربی به انگلیسی فقط برای مقایسهٔ کدها در مرتب‌سازی.
+String _normDigits(String s) {
+  final b = StringBuffer();
+  for (final r in s.runes) {
+    if (r >= 0x06F0 && r <= 0x06F9) {
+      b.writeCharCode(r - 0x06F0 + 0x30);
+    } else if (r >= 0x0660 && r <= 0x0669) {
+      b.writeCharCode(r - 0x0660 + 0x30);
+    } else {
+      b.writeCharCode(r);
+    }
+  }
+  return b.toString();
+}
+
+/// مقایسهٔ کدها: کدهای عددی به‌صورت عددی (۲ قبل از ۱۰)، سپس متنی.
+int _compareCodes(String a, String b) {
+  final na = _normDigits(a.trim());
+  final nb = _normDigits(b.trim());
+  final ia = int.tryParse(na);
+  final ib = int.tryParse(nb);
+  if (ia != null && ib != null) {
+    final c = ia.compareTo(ib);
+    if (c != 0) return c;
+    return 0;
+  }
+  if (ia != null) return -1;
+  if (ib != null) return 1;
+  return na.compareTo(nb);
+}
+
 class ServicesScreen extends StatefulWidget {
   const ServicesScreen({super.key});
   @override
@@ -33,11 +64,20 @@ class _ServicesScreenState extends State<ServicesScreen> {
   final _searchCtrl = TextEditingController();
   int? _filterBrandId;
   int? _filterModelId;
+  String _sortBy = 'name'; // 'name' یا 'code'
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  int _compareServices(ServiceItem a, ServiceItem b) {
+    if (_sortBy == 'code') {
+      final c = _compareCodes(a.code, b.code);
+      if (c != 0) return c;
+    }
+    return a.name.compareTo(b.name);
   }
 
   Future<void> _load() async {
@@ -172,9 +212,29 @@ class _ServicesScreenState extends State<ServicesScreen> {
     for (final s in _services) {
       grouped.putIfAbsent(s.categoryId, () => []).add(s);
     }
+    for (final l in grouped.values) {
+      l.sort(_compareServices);
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('خدمات'), actions: [
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.sort),
+          tooltip: 'مرتب‌سازی',
+          onSelected: (v) => setState(() => _sortBy = v),
+          itemBuilder: (_) => [
+            CheckedPopupMenuItem<String>(
+              value: 'name',
+              checked: _sortBy == 'name',
+              child: const Text('بر اساس نام'),
+            ),
+            CheckedPopupMenuItem<String>(
+              value: 'code',
+              checked: _sortBy == 'code',
+              child: const Text('بر اساس کد'),
+            ),
+          ],
+        ),
         IconButton(icon: const Icon(Icons.create_new_folder_outlined), onPressed: _addCategory),
       ]),
       body: Column(children: [
@@ -246,7 +306,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                         onLongPress: () => _showServiceActions(s),
                                         child: ListTile(
                                           title: Text(s.name),
-                                          subtitle: Text(_brandLabel(s)),
+                                          subtitle: Text(_sortBy == 'code'
+                                              ? 'کد: ${s.code} - ${_brandLabel(s)}'
+                                              : _brandLabel(s)),
                                           trailing: Text(CurrencyFormatter.format(s.price, _currency)),
                                           onTap: () => _addOrEditService(service: s),
                                         ),
