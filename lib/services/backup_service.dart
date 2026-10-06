@@ -8,6 +8,7 @@ import '../database/database_helper.dart';
 import '../models/app_settings.dart';
 import '../models/backup_models.dart';
 import '../models/invoice_layout_settings.dart';
+import '../repositories/finance_repository.dart';
 import '../repositories/invoice_repository.dart';
 import 'invoice_layout_storage.dart';
 
@@ -38,6 +39,10 @@ class _RefMaps {
 /// می‌شوند و شماره کارت/شبایی که قبلاً نیست اضافه می‌شود؛ هیچ داده‌ی دیگری
 /// تغییر نمی‌کند. رمز عبور برنامه هرگز جزو Backup نیست (فقط کلیدهای
 /// شناخته‌شده‌ی AppSettings ذخیره می‌شوند).
+///
+/// حساب مالی فروش کالا (finance_accounts / finance_transactions) فقط در
+/// Backup «کامل» می‌آید. Backupهای قدیمی‌تر این بخش را ندارند؛ بازیابی آن‌ها
+/// دفتر مالی فعلی را دست نمی‌زند.
 class BackupService {
   final _db = DatabaseHelper.instance;
 
@@ -271,7 +276,8 @@ class BackupService {
     return _writeEnvelopeToFile(envelope, _fileNameFor(BackupType.settings));
   }
 
-  /// بکاپ کامل: همه‌ی بخش‌های بالا + همه‌ی برندها و مدل‌ها + تنظیمات.
+  /// بکاپ کامل: همه‌ی بخش‌های بالا + همه‌ی برندها و مدل‌ها + تنظیمات +
+  /// حساب مالی فروش کالا و تراکنش‌های آن.
   Future<BackupEnvelope> _buildFullEnvelope() async {
     final db = await _db.database;
     final customers = await db.query('customers');
@@ -285,6 +291,8 @@ class BackupService {
     final invoices = await db.query('invoices');
     final items = await db.query('invoice_items');
     final sideCosts = await db.query('side_costs');
+    final financeAccounts = await db.query('finance_accounts');
+    final financeTx = await db.query('finance_transactions');
     final settingsData = await _collectSettingsData(db);
 
     final counts = <String, int>{
@@ -299,6 +307,8 @@ class BackupService {
       'invoices': invoices.length,
       'invoice_items': items.length,
       'side_costs': sideCosts.length,
+      'finance_accounts': financeAccounts.length,
+      'finance_transactions': financeTx.length,
     }..addAll(_settingsCounts(settingsData));
 
     final data = <String, dynamic>{
@@ -313,6 +323,8 @@ class BackupService {
       'invoices': invoices,
       'invoice_items': items,
       'side_costs': sideCosts,
+      'finance_accounts': financeAccounts,
+      'finance_transactions': financeTx,
     }..addAll(settingsData);
 
     final envelope = BackupEnvelope(
@@ -774,12 +786,96 @@ class BackupService {
     return '$prefix/${maxNum + 1}';
   }
 
+  // ==================== Merge: حساب مالی فروش کالا ====================
+
+  /// ادغام دفتر مالی در حالت «افزودن». حساب‌ها بر اساس نوع حساب تطبیق
+  /// داده می‌شوند (فعلاً فقط یک حساب فروش کالا داریم). تراکنش‌ها بر اساس
+  /// backup_uid تطبیق می‌خورند؛ تراکنش موجود دوباره اضافه نمی‌شود و هیچ
+  /// تراکنش مقصد حذف یا تغییر نمی‌کند.
+  Future<void> _mergeFinance(
+    Transaction txn,
+    List<dynamic> rawAccounts,
+    List<dynamic> rawTx,
+    RestoreReport report,
+  ) async {
+    if (rawAccounts.isEmpty && rawTx.isEmpty) return;
+
+    final accountIdMap = <int, int>{};
+    for (final rawA in rawAccounts) {
+      final a = Map<String, dynamic>.from(rawA as Map);
+      final oldId = _asIntOrNull(a['id']);
+      final type = (a['account_type'] as String?) ?? 'goods_sales';
+      final rows = await txn.query('finance_accounts',
+          where: 'account_type = ?', whereArgs: [type], orderBy: 'id ASC', limit: 1);
+      if (rows.isNotEmpty) {
+        if (oldId != null) accountIdMap[oldId] = rows.first['id'] as int;
+        report.financeAccountsMatched++;
+      } else {
+        final newId = await _insertRaw(txn, 'finance_accounts', a);
+        if (oldId != null) accountIdMap[oldId] = newId;
+        report.financeAccountsAdded++;
+      }
+    }
+
+    final txs = rawTx.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+      ..sort((x, y) => (_asIntOrNull(x['id']) ?? 0).compareTo(_asIntOrNull(y['id']) ?? 0));
+    final txIdMap = <int, int>{};
+
+    for (final t in txs) {
+      final oldId = _asIntOrNull(t['id']);
+      final oldAccount = _asIntOrNull(t['account_id']);
+      if (oldAccount == null || !accountIdMap.containsKey(oldAccount)) {
+        report.notes.add('یک تراکنش مالی به دلیل نبود حساب متناظر نادیده گرفته شد.');
+        continue;
+      }
+
+      final uid = (t['backup_uid'] as String?)?.trim() ?? '';
+      if (uid.isNotEmpty) {
+        final rows =
+            await txn.query('finance_transactions', where: 'backup_uid = ?', whereArgs: [uid], limit: 1);
+        if (rows.isNotEmpty) {
+          if (oldId != null) txIdMap[oldId] = rows.first['id'] as int;
+          report.financeTxMatched++;
+          continue;
+        }
+      } else {
+        t['backup_uid'] = FinanceRepository.generateUid();
+      }
+
+      // اصلاحیه باید به تراکنش اصلیِ نگاشت‌شده وصل شود، و هر تراکنش در مقصد
+      // فقط یک اصلاحیه می‌تواند داشته باشد.
+      final oldRev = _asIntOrNull(t['reverses_id']);
+      if (oldRev != null) {
+        final mappedRev = txIdMap[oldRev];
+        if (mappedRev == null) {
+          report.notes.add('یک اصلاحیه‌ی مالی به دلیل نبود تراکنش اصلی نادیده گرفته شد.');
+          continue;
+        }
+        final dup = await txn.query('finance_transactions', where: 'reverses_id = ?', whereArgs: [mappedRev], limit: 1);
+        if (dup.isNotEmpty) {
+          report.notes.add('یک اصلاحیه‌ی مالی نادیده گرفته شد چون آن تراکنش قبلاً اصلاح شده بود.');
+          continue;
+        }
+      }
+
+      final newId = await _insertRaw(txn, 'finance_transactions', t,
+          fkMappings: {'account_id': accountIdMap, 'reverses_id': txIdMap});
+      if (oldId != null) txIdMap[oldId] = newId;
+      report.financeTxAdded++;
+    }
+
+    if (report.financeTxAdded > 0 && report.financeAccountsMatched > 0) {
+      report.notes.add('دفتر مالی فروش کالا با دفتر فعلی ادغام شد. اگر هر دو دفتر موجودی اولیه‌ی جداگانه داشتند، '
+          'گردش مالی را بررسی کنید و در صورت لزوم اصلاحیه ثبت کنید.');
+    }
+  }
+
   // ==================== تنظیمات (مشترک بین Merge/Replace/نوع settings) ====================
 
   /// بخش دیتابیسیِ تنظیمات، داخل تراکنش:
   /// - [overwriteValues]: مقادیر تنظیمات (فقط کلیدهای شناخته‌شده) بازنویسی شوند.
   /// - [replaceAccounts]: حساب‌های پرداخت کاملاً جایگزین شوند (وگرنه فقط
-  ///   حساب‌هایی که قبلاً نیستند اضافه می‌شوند).
+  ///   حساب‌هایی که قبلاً نیست اضافه می‌شوند).
   Future<void> _restoreSettingsPart(
     Transaction txn,
     Map<String, dynamic> data,
@@ -959,6 +1055,7 @@ class BackupService {
             serviceIdMap,
             report,
           );
+          await _mergeFinance(txn, _list(data, 'finance_accounts'), _list(data, 'finance_transactions'), report);
           await _restoreSettingsPart(txn, data, report, overwriteValues: false, replaceAccounts: false);
           report.notes.add('در حالت «افزودن»، تنظیمات برنامه تغییر نکرد.');
           break;
@@ -1066,6 +1163,14 @@ class BackupService {
             await txn.delete('products');
             await txn.delete('vehicles');
             await txn.delete('customers');
+            // دفتر مالی فقط وقتی جایگزین می‌شود که خود Backup آن را دارد
+            // (Backupهای نسخه‌ی ۱ و ۲ بخش مالی ندارند و دفتر فعلی را
+            // دست‌نخورده می‌گذارند).
+            final hasFinance = data['finance_accounts'] is List;
+            if (hasFinance) {
+              await txn.delete('finance_transactions');
+              await txn.delete('finance_accounts');
+            }
             // برند/مدل فقط وقتی جایگزین می‌شوند که خود Backup آن‌ها را دارد
             // (Backupهای نسخه‌ی ۱ برند/مدل ندارند).
             final hasRefData = data['vehicle_brands'] is List;
@@ -1112,6 +1217,17 @@ class BackupService {
             }
             for (final rawCost in _list(data, 'side_costs')) {
               await _insertRaw(txn, 'side_costs', Map<String, dynamic>.from(rawCost as Map));
+            }
+            if (hasFinance) {
+              for (final rawA in _list(data, 'finance_accounts')) {
+                await _insertRaw(txn, 'finance_accounts', Map<String, dynamic>.from(rawA as Map), keepId: true);
+                report.financeAccountsAdded++;
+              }
+              for (final rawT in _list(data, 'finance_transactions')) {
+                await _insertRaw(txn, 'finance_transactions', Map<String, dynamic>.from(rawT as Map),
+                    keepId: true);
+                report.financeTxAdded++;
+              }
             }
             await _cleanupOrphanStockMovements(txn, report);
             await _restoreSettingsPart(txn, data, report, overwriteValues: true, replaceAccounts: true);
@@ -1174,6 +1290,8 @@ class BackupService {
       'app_settings': 'تنظیمات برنامه',
       'invoice_layout': 'قالب فاکتور',
       'stamp_image': 'عکس مهر/امضا',
+      'finance_accounts': 'حساب مالی فروش کالا',
+      'finance_transactions': 'تراکنش‌های مالی فروش کالا',
     };
     return labels[key] ?? key;
   }
@@ -1192,7 +1310,8 @@ class BackupService {
       errors.add('ساختار دیتابیس این Backup جدیدتر از برنامه‌ی فعلی است؛ ابتدا برنامه را به‌روزرسانی کنید.');
     }
     if (env.backupVersion < BackupEnvelope.currentVersion) {
-      warnings.add('این Backup با نسخه‌ی قدیمی‌تری ساخته شده و ممکن است برند/مدل، تنظیمات و قالب فاکتور نداشته باشد.');
+      warnings.add('این Backup با نسخه‌ی قدیمی‌تری ساخته شده و ممکن است برخی بخش‌ها '
+          '(برند/مدل، تنظیمات، قالب فاکتور یا حساب مالی فروش کالا) را نداشته باشد؛ بخش‌های ناموجود دست‌نخورده می‌مانند.');
     }
 
     if (path != null) {
@@ -1290,201 +1409,4 @@ class BackupService {
           'SELECT COUNT(*) FROM services s JOIN vehicle_models m ON m.id = s.model_id '
           'WHERE s.brand_id IS NOT NULL AND m.brand_id != s.brand_id'),
       'قلم فاکتور بدون فاکتور':
-          await count('SELECT COUNT(*) FROM invoice_items WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
-      'هزینه‌ی جانبی بدون فاکتور':
-          await count('SELECT COUNT(*) FROM side_costs WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
-    };
-  }
-
-  List<String> _newIssues(Map<String, int> before, Map<String, int> after) {
-    final out = <String>[];
-    after.forEach((label, n) {
-      final b = before[label] ?? 0;
-      if (n > b) out.add('$label: ${n - b} مورد جدید');
-    });
-    return out;
-  }
-
-  Future<bool> _integrityOk(DatabaseExecutor db) async {
-    final rows = await db.rawQuery('PRAGMA integrity_check');
-    return rows.length == 1 && rows.first.values.first.toString().toLowerCase() == 'ok';
-  }
-
-  /// در حالت جایگزینی، تعداد رکوردهای هر جدولِ جایگزین‌شده باید دقیقاً برابر
-  /// تعداد داخل Backup باشد.
-  Future<List<String>> _countIssues(DatabaseExecutor db, BackupEnvelope env) async {
-    final tables = <String>[];
-    switch (env.backupType) {
-      case BackupType.customers:
-        tables.addAll(['customers', 'vehicles']);
-        break;
-      case BackupType.products:
-        tables.add('products');
-        break;
-      case BackupType.services:
-        tables.addAll(['services', 'service_categories', 'service_price_history']);
-        break;
-      case BackupType.invoices:
-        tables.addAll(['invoices', 'invoice_items', 'side_costs']);
-        break;
-      case BackupType.settings:
-        break;
-      case BackupType.full:
-        tables.addAll([
-          'customers',
-          'vehicles',
-          'products',
-          'services',
-          'service_categories',
-          'service_price_history',
-          'invoices',
-          'invoice_items',
-          'side_costs',
-        ]);
-        if (env.data['vehicle_brands'] is List) tables.addAll(['vehicle_brands', 'vehicle_models']);
-        if (env.data['payment_accounts'] is List) tables.add('payment_accounts');
-        break;
-    }
-    final issues = <String>[];
-    for (final t in tables) {
-      final expected = env.recordCounts[t];
-      if (expected == null) continue;
-      final actual = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
-      if (actual != expected) {
-        issues.add('تعداد «${sectionLabel(t)}» بعد از بازیابی ($actual) با Backup ($expected) برابر نیست.');
-      }
-    }
-    return issues;
-  }
-
-  Future<RestoreReport> _execute(Database db, BackupEnvelope env, RestoreMode mode,
-      {required bool applyExtras}) async {
-    final report = RestoreReport();
-    final isSettings = env.backupType == BackupType.settings;
-    final replace = !isSettings && mode == RestoreMode.replace;
-    if (replace) {
-      await _runReplace(db, env, report);
-    } else {
-      await _runMerge(db, env, report);
-    }
-    if (applyExtras && (isSettings || (replace && env.backupType == BackupType.full))) {
-      await _applySettingsExtras(env.data, report);
-    }
-    return report;
-  }
-
-  /// Restore آزمایشی روی یک کپی ایزوله از دیتابیس فعلی (فایل موقت). هیچ
-  /// تغییری روی اطلاعات واقعی ایجاد نمی‌کند. مشکلات پیداشده در
-  /// report.issues می‌آید؛ اگر خالی نبود، Restore واقعی نباید انجام شود.
-  Future<RestoreReport> dryRun(BackupEnvelope env, RestoreMode mode) async {
-    await _db.database;
-    final tmpDir = await getTemporaryDirectory();
-    final tmpPath = p.join(tmpDir.path, 'restore_dryrun_${DateTime.now().millisecondsSinceEpoch}.db');
-    await File(await _db.getDbFilePath()).copy(tmpPath);
-    Database? tmpDb;
-    try {
-      tmpDb = await openDatabase(tmpPath, onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'));
-      final before = await _integrityCounts(tmpDb);
-      final report = await _execute(tmpDb, env, mode, applyExtras: false);
-      report.issues.addAll(_newIssues(before, await _integrityCounts(tmpDb)));
-      final isReplace = env.backupType != BackupType.settings && mode == RestoreMode.replace;
-      if (isReplace) report.issues.addAll(await _countIssues(tmpDb, env));
-      if (!await _integrityOk(tmpDb)) report.issues.add('بررسی سلامت دیتابیس در Restore آزمایشی خطا داد.');
-      return report;
-    } finally {
-      try {
-        await tmpDb?.close();
-      } catch (_) {}
-      for (final suffix in ['', '-journal', '-wal', '-shm']) {
-        try {
-          final f = File('$tmpPath$suffix');
-          if (await f.exists()) await f.delete();
-        } catch (_) {}
-      }
-    }
-  }
-
-  /// Restore واقعی. همیشه ابتدا اعتبارسنجی می‌شود و قبل از هر تغییر یک
-  /// Snapshot اضطراری وجود دارد (اگر [snapshot] داده نشود همین‌جا ساخته
-  /// می‌شود و شکستش Restore را متوقف می‌کند). بعد از Restore، اعتبارسنجی
-  /// خودکار انجام و مشکلات در report.issues گزارش می‌شود.
-  /// بازیابی تنظیمات حالت افزودن/جایگزینی ندارد و همیشه یک رفتار دارد.
-  Future<RestoreReport> restore(BackupEnvelope envelope, RestoreMode mode, {File? snapshot}) async {
-    final validation = validateEnvelope(envelope);
-    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
-
-    final snap = snapshot ?? await createPreRestoreSnapshot();
-    final db = await _db.database;
-    final before = await _integrityCounts(db);
-
-    final report = await _execute(db, envelope, mode, applyExtras: true);
-    report.snapshotPath = snap.path;
-
-    report.issues.addAll(_newIssues(before, await _integrityCounts(db)));
-    final isReplace = envelope.backupType != BackupType.settings && mode == RestoreMode.replace;
-    if (isReplace) report.issues.addAll(await _countIssues(db, envelope));
-    if (!await _integrityOk(db)) report.issues.add('بررسی سلامت فایل دیتابیس خطا داد.');
-    return report;
-  }
-
-  /// برگشت به وضعیت قبل از Restore با استفاده از Snapshot اضطراری (که یک
-  /// Backup کامل است و با جایگزینی کامل بازیابی می‌شود).
-  Future<RestoreReport> rollbackToSnapshot(File snapshot) async {
-    final env = await readBackupFile(snapshot.path);
-    final validation = validateEnvelope(env);
-    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
-    final db = await _db.database;
-    return _execute(db, env, RestoreMode.replace, applyExtras: true);
-  }
-
-  // ==================== به‌روزرسانی یک Backup موجود ====================
-
-  /// به‌روزرسانی یک فایل Backup موجود با وضعیت فعلی دیتابیس: Export تازه از
-  /// وضعیت فعلی و بازنویسی همان فایل؛ createdAt اصلی حفظ و فقط updatedAt
-  /// تغییر می‌کند.
-  Future<File> updateExistingBackup(String existingFilePath) async {
-    final oldEnvelope = await readBackupFile(existingFilePath);
-    final fresh = await exportByType(oldEnvelope.backupType);
-    final freshContent = await fresh.readAsString();
-    final freshJson = jsonDecode(freshContent) as Map<String, dynamic>;
-    final freshEnvelope = BackupEnvelope.fromJson(freshJson);
-
-    final merged = BackupEnvelope(
-      backupType: freshEnvelope.backupType,
-      appDbVersion: freshEnvelope.appDbVersion,
-      createdAt: oldEnvelope.createdAt, // تاریخ ایجاد اصلی حفظ می‌شود
-      updatedAt: DateTime.now().toIso8601String(),
-      recordCounts: freshEnvelope.recordCounts,
-      data: freshEnvelope.data,
-    );
-
-    await File(existingFilePath).writeAsString(jsonEncode(merged.toJson()));
-    // فایل موقت exportByType دیگر لازم نیست.
-    try {
-      await fresh.delete();
-    } catch (_) {}
-    return File(existingFilePath);
-  }
-
-  // ==================== سازگاری با نسخه‌ی قدیمی (فایل .db کامل) ====================
-
-  Future<File> createLegacyFullDbBackup() async {
-    await _db.database;
-    final dbPath = await _db.getDbFilePath();
-    final dbFile = File(dbPath);
-    if (!await dbFile.exists()) throw StateError('فایل دیتابیس یافت نشد');
-    final backupDir = await getApplicationDocumentsDirectory();
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final backupPath = '${backupDir.path}/receipt_backup_$timestamp.db';
-    return dbFile.copy(backupPath);
-  }
-
-  Future<void> restoreLegacyFullDbFromPath(String pickedPath) async {
-    final dbPath = await _db.getDbFilePath();
-    await _db.close();
-    final pickedFile = File(pickedPath);
-    if (!await pickedFile.exists()) throw StateError('فایل یافت نشد');
-    await pickedFile.copy(dbPath);
-    await _db.database;
-  }
-}
+          await count('SEL
