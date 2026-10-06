@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import '../database/database_helper.dart';
 import '../models/invoice.dart';
+import 'finance_invoice_posting.dart';
 import 'settings_repository.dart';
 
 class InvoiceRepository {
@@ -123,14 +124,21 @@ class InvoiceRepository {
   /// - رکورد با is_draft = 1 ذخیره می‌شود.
   /// - هیچ اثری روی موجودی کالا یا stock_movements گذاشته نمی‌شود؛ این اثر
   ///   فقط هنگام تبدیل به فاکتور اصلی (convertDraftToInvoice) اعمال می‌شود.
+  /// - هیچ اثر مالی هم ندارد؛ اثر روی حساب مالی هم فقط هنگام تبدیل ثبت می‌شود.
   ///
   /// وقتی [isDraft] برابر false باشد (پیش‌فرض)، رفتار دقیقاً مثل قبل است:
-  /// قیمت هر ردیف فریز می‌شود و موجودی بلافاصله به‌روزرسانی می‌شود.
+  /// قیمت هر ردیف فریز می‌شود و موجودی بلافاصله به‌روزرسانی می‌شود؛ سپس
+  /// اثر مالی (حساب فروش کالا) در همین تراکنش ثبت می‌شود.
+  ///
+  /// [financePay]: تیک «پرداخت از حساب فروش کالا» (فقط برای فاکتور خرید
+  /// معنا دارد). در ستون finance_pay ذخیره می‌شود تا هنگام تبدیل پیش‌فاکتور
+  /// هم در دسترس باشد.
   Future<int> createInvoice({
     required Invoice invoice,
     required List<InvoiceItem> items,
     required List<SideCost> sideCosts,
     bool isDraft = false,
+    bool financePay = false,
   }) async {
     final db = await _db.database;
     return db.transaction((txn) async {
@@ -142,6 +150,7 @@ class InvoiceRepository {
       if (map['backup_uid'] == null || (map['backup_uid'] as String).isEmpty) {
         map['backup_uid'] = generateBackupUid();
       }
+      map['finance_pay'] = financePay ? 1 : 0;
       final invoiceId = await txn.insert('invoices', map);
 
       for (final item in items) {
@@ -156,6 +165,10 @@ class InvoiceRepository {
         await txn.insert('side_costs', cost.toMap()..remove('id')..['invoice_id'] = invoiceId);
       }
 
+      if (!isDraft) {
+        await FinanceInvoicePosting.onInvoiceIssued(txn, invoiceId: invoiceId);
+      }
+
       return invoiceId;
     });
   }
@@ -167,8 +180,8 @@ class InvoiceRepository {
   /// امکان‌پذیر نیست. شماره‌ی جدید از سری اصلی (بر اساس [type]) گرفته
   /// می‌شود؛ سپس همان منطق موجودی که در createInvoice استفاده می‌شود
   /// (_applyStockEffect) برای اولین و تنها بار روی آیتم‌های این فاکتور
-  /// اجرا می‌شود. تمام این مراحل در یک تراکنش هستند: یا همه انجام می‌شوند
-  /// یا هیچ‌کدام.
+  /// اجرا می‌شود و بعد اثر مالی (حساب فروش کالا) ثبت می‌شود. تمام این
+  /// مراحل در یک تراکنش هستند: یا همه انجام می‌شوند یا هیچ‌کدام.
   ///
   /// backup_uid رکورد تغییر نمی‌کند؛ همان شناسه‌ی پایدار از پیش‌فاکتور به
   /// فاکتور اصلی منتقل می‌شود.
@@ -220,6 +233,8 @@ class InvoiceRepository {
         await _applyStockEffect(txn, item: item, invoiceType: invoice.type, invoiceId: invoiceId);
       }
 
+      await FinanceInvoicePosting.onInvoiceIssued(txn, invoiceId: invoiceId);
+
       return newNumber;
     });
   }
@@ -232,11 +247,13 @@ class InvoiceRepository {
   /// (یعنی قبلاً به فاکتور اصلی تبدیل شده)، استثنا پرتاب می‌شود و هیچ
   /// تغییری اعمال نمی‌شود. هیچ اثری روی موجودی کالا یا stock_movements
   /// ندارد. شماره‌ی پیش‌فاکتور و backup_uid آن با ویرایش تغییر نمی‌کنند.
+  /// اگر [financePay] داده شود، ستون finance_pay هم به‌روز می‌شود.
   Future<void> updateDraftInvoice({
     required int invoiceId,
     required Invoice invoice,
     required List<InvoiceItem> items,
     required List<SideCost> sideCosts,
+    bool? financePay,
   }) async {
     final db = await _db.database;
     await db.transaction((txn) async {
@@ -252,6 +269,7 @@ class InvoiceRepository {
         ..['is_draft'] = 1
         ..['invoice_number'] = current.invoiceNumber // شماره‌ی پیش‌فاکتور با ویرایش تغییر نمی‌کند
         ..['backup_uid'] = current.backupUid; // شناسه‌ی پایدار هرگز تغییر نمی‌کند
+      if (financePay != null) map['finance_pay'] = financePay ? 1 : 0;
       await txn.update('invoices', map, where: 'id = ?', whereArgs: [invoiceId]);
 
       await txn.delete('invoice_items', where: 'invoice_id = ?', whereArgs: [invoiceId]);
@@ -264,6 +282,16 @@ class InvoiceRepository {
         await txn.insert('side_costs', cost.toMap()..remove('id')..['invoice_id'] = invoiceId);
       }
     });
+  }
+
+  /// مقدار ستون finance_pay (تیک پرداخت از حساب فروش کالا) یک فاکتور.
+  /// برای پر کردن اولیه‌ی صفحه‌ی ویرایش پیش‌فاکتور استفاده می‌شود.
+  Future<bool> getFinancePay(int invoiceId) async {
+    final db = await _db.database;
+    final rows = await db.query('invoices',
+        columns: ['finance_pay'], where: 'id = ?', whereArgs: [invoiceId], limit: 1);
+    if (rows.isEmpty) return false;
+    return (rows.first['finance_pay'] as int? ?? 0) == 1;
   }
 
   Future<Invoice?> getById(int id) async {
