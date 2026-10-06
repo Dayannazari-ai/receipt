@@ -1409,4 +1409,202 @@ class BackupService {
           'SELECT COUNT(*) FROM services s JOIN vehicle_models m ON m.id = s.model_id '
           'WHERE s.brand_id IS NOT NULL AND m.brand_id != s.brand_id'),
       'قلم فاکتور بدون فاکتور':
-          await count('SEL
+          await count('SELECT COUNT(*) FROM invoice_items WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
+      'هزینه‌ی جانبی بدون فاکتور':
+          await count('SELECT COUNT(*) FROM side_costs WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
+    };
+  }
+
+  List<String> _newIssues(Map<String, int> before, Map<String, int> after) {
+    final out = <String>[];
+    after.forEach((label, n) {
+      final b = before[label] ?? 0;
+      if (n > b) out.add('$label: ${n - b} مورد جدید');
+    });
+    return out;
+  }
+
+  Future<bool> _integrityOk(DatabaseExecutor db) async {
+    final rows = await db.rawQuery('PRAGMA integrity_check');
+    return rows.length == 1 && rows.first.values.first.toString().toLowerCase() == 'ok';
+  }
+
+  /// در حالت جایگزینی، تعداد رکوردهای هر جدولِ جایگزین‌شده باید دقیقاً برابر
+  /// تعداد داخل Backup باشد.
+  Future<List<String>> _countIssues(DatabaseExecutor db, BackupEnvelope env) async {
+    final tables = <String>[];
+    switch (env.backupType) {
+      case BackupType.customers:
+        tables.addAll(['customers', 'vehicles']);
+        break;
+      case BackupType.products:
+        tables.add('products');
+        break;
+      case BackupType.services:
+        tables.addAll(['services', 'service_categories', 'service_price_history']);
+        break;
+      case BackupType.invoices:
+        tables.addAll(['invoices', 'invoice_items', 'side_costs']);
+        break;
+      case BackupType.settings:
+        break;
+      case BackupType.full:
+        tables.addAll([
+          'customers',
+          'vehicles',
+          'products',
+          'services',
+          'service_categories',
+          'service_price_history',
+          'invoices',
+          'invoice_items',
+          'side_costs',
+        ]);
+        if (env.data['vehicle_brands'] is List) tables.addAll(['vehicle_brands', 'vehicle_models']);
+        if (env.data['payment_accounts'] is List) tables.add('payment_accounts');
+        if (env.data['finance_accounts'] is List) tables.addAll(['finance_accounts', 'finance_transactions']);
+        break;
+    }
+    final issues = <String>[];
+    for (final t in tables) {
+      final expected = env.recordCounts[t];
+      if (expected == null) continue;
+      final actual = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
+      if (actual != expected) {
+        issues.add('تعداد «${sectionLabel(t)}» بعد از بازیابی ($actual) با Backup ($expected) برابر نیست.');
+      }
+    }
+    return issues;
+  }
+
+  Future<RestoreReport> _execute(Database db, BackupEnvelope env, RestoreMode mode,
+      {required bool applyExtras}) async {
+    final report = RestoreReport();
+    final isSettings = env.backupType == BackupType.settings;
+    final replace = !isSettings && mode == RestoreMode.replace;
+    if (replace) {
+      await _runReplace(db, env, report);
+    } else {
+      await _runMerge(db, env, report);
+    }
+    if (applyExtras && (isSettings || (replace && env.backupType == BackupType.full))) {
+      await _applySettingsExtras(env.data, report);
+    }
+    return report;
+  }
+
+  /// Restore آزمایشی روی یک کپی ایزوله از دیتابیس فعلی (فایل موقت). هیچ
+  /// تغییری روی اطلاعات واقعی ایجاد نمی‌کند. مشکلات پیداشده در
+  /// report.issues می‌آید؛ اگر خالی نبود، Restore واقعی نباید انجام شود.
+  Future<RestoreReport> dryRun(BackupEnvelope env, RestoreMode mode) async {
+    await _db.database;
+    final tmpDir = await getTemporaryDirectory();
+    final tmpPath = p.join(tmpDir.path, 'restore_dryrun_${DateTime.now().millisecondsSinceEpoch}.db');
+    await File(await _db.getDbFilePath()).copy(tmpPath);
+    Database? tmpDb;
+    try {
+      tmpDb = await openDatabase(tmpPath, onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'));
+      final before = await _integrityCounts(tmpDb);
+      final report = await _execute(tmpDb, env, mode, applyExtras: false);
+      report.issues.addAll(_newIssues(before, await _integrityCounts(tmpDb)));
+      final isReplace = env.backupType != BackupType.settings && mode == RestoreMode.replace;
+      if (isReplace) report.issues.addAll(await _countIssues(tmpDb, env));
+      if (!await _integrityOk(tmpDb)) report.issues.add('بررسی سلامت دیتابیس در Restore آزمایشی خطا داد.');
+      return report;
+    } finally {
+      try {
+        await tmpDb?.close();
+      } catch (_) {}
+      for (final suffix in ['', '-journal', '-wal', '-shm']) {
+        try {
+          final f = File('$tmpPath$suffix');
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// Restore واقعی. همیشه ابتدا اعتبارسنجی می‌شود و قبل از هر تغییر یک
+  /// Snapshot اضطراری وجود دارد (اگر [snapshot] داده نشود همین‌جا ساخته
+  /// می‌شود و شکستش Restore را متوقف می‌کند). بعد از Restore، اعتبارسنجی
+  /// خودکار انجام و مشکلات در report.issues گزارش می‌شود.
+  /// بازیابی تنظیمات حالت افزودن/جایگزینی ندارد و همیشه یک رفتار دارد.
+  Future<RestoreReport> restore(BackupEnvelope envelope, RestoreMode mode, {File? snapshot}) async {
+    final validation = validateEnvelope(envelope);
+    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+
+    final snap = snapshot ?? await createPreRestoreSnapshot();
+    final db = await _db.database;
+    final before = await _integrityCounts(db);
+
+    final report = await _execute(db, envelope, mode, applyExtras: true);
+    report.snapshotPath = snap.path;
+
+    report.issues.addAll(_newIssues(before, await _integrityCounts(db)));
+    final isReplace = envelope.backupType != BackupType.settings && mode == RestoreMode.replace;
+    if (isReplace) report.issues.addAll(await _countIssues(db, envelope));
+    if (!await _integrityOk(db)) report.issues.add('بررسی سلامت فایل دیتابیس خطا داد.');
+    return report;
+  }
+
+  /// برگشت به وضعیت قبل از Restore با استفاده از Snapshot اضطراری (که یک
+  /// Backup کامل است و با جایگزینی کامل بازیابی می‌شود).
+  Future<RestoreReport> rollbackToSnapshot(File snapshot) async {
+    final env = await readBackupFile(snapshot.path);
+    final validation = validateEnvelope(env);
+    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+    final db = await _db.database;
+    return _execute(db, env, RestoreMode.replace, applyExtras: true);
+  }
+
+  // ==================== به‌روزرسانی یک Backup موجود ====================
+
+  /// به‌روزرسانی یک فایل Backup موجود با وضعیت فعلی دیتابیس: Export تازه از
+  /// وضعیت فعلی و بازنویسی همان فایل؛ createdAt اصلی حفظ و فقط updatedAt
+  /// تغییر می‌کند.
+  Future<File> updateExistingBackup(String existingFilePath) async {
+    final oldEnvelope = await readBackupFile(existingFilePath);
+    final fresh = await exportByType(oldEnvelope.backupType);
+    final freshContent = await fresh.readAsString();
+    final freshJson = jsonDecode(freshContent) as Map<String, dynamic>;
+    final freshEnvelope = BackupEnvelope.fromJson(freshJson);
+
+    final merged = BackupEnvelope(
+      backupType: freshEnvelope.backupType,
+      appDbVersion: freshEnvelope.appDbVersion,
+      createdAt: oldEnvelope.createdAt, // تاریخ ایجاد اصلی حفظ می‌شود
+      updatedAt: DateTime.now().toIso8601String(),
+      recordCounts: freshEnvelope.recordCounts,
+      data: freshEnvelope.data,
+    );
+
+    await File(existingFilePath).writeAsString(jsonEncode(merged.toJson()));
+    // فایل موقت exportByType دیگر لازم نیست.
+    try {
+      await fresh.delete();
+    } catch (_) {}
+    return File(existingFilePath);
+  }
+
+  // ==================== سازگاری با نسخه‌ی قدیمی (فایل .db کامل) ====================
+
+  Future<File> createLegacyFullDbBackup() async {
+    await _db.database;
+    final dbPath = await _db.getDbFilePath();
+    final dbFile = File(dbPath);
+    if (!await dbFile.exists()) throw StateError('فایل دیتابیس یافت نشد');
+    final backupDir = await getApplicationDocumentsDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final backupPath = '${backupDir.path}/receipt_backup_$timestamp.db';
+    return dbFile.copy(backupPath);
+  }
+
+  Future<void> restoreLegacyFullDbFromPath(String pickedPath) async {
+    final dbPath = await _db.getDbFilePath();
+    await _db.close();
+    final pickedFile = File(pickedPath);
+    if (!await pickedFile.exists()) throw StateError('فایل یافت نشد');
+    await pickedFile.copy(dbPath);
+    await _db.database;
+  }
+}
