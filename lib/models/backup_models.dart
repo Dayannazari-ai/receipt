@@ -5,7 +5,7 @@ enum BackupType {
   services, // خدمات + دسته‌بندی‌ها + سوابق قیمت (+ برند/مدل‌های ارجاع‌شده)
   invoices, // فاکتورها + اقلام + هزینه‌های جانبی (شامل ارجاع مشتری/خودرو)
   settings, // تنظیمات برنامه + حساب‌های پرداخت + قالب فاکتور + عکس مهر
-  full, // همه‌ی بخش‌های بالا + برندها و مدل‌ها
+  full, // همه‌ی بخش‌های بالا + برندها و مدل‌ها + حساب مالی فروش کالا
 }
 
 extension BackupTypeX on BackupType {
@@ -74,7 +74,10 @@ class BackupEnvelope {
   /// نسخه ۲: افزوده شدن برندها/مدل‌ها، حساب‌های پرداخت، تنظیمات، قالب فاکتور
   /// و عکس مهر. فایل‌های نسخه ۱ همچنان خوانده می‌شوند (کلیدهای جدید خالی
   /// فرض می‌شوند).
-  static const int currentVersion = 2;
+  /// نسخه ۳: افزوده شدن حساب مالی فروش کالا و تراکنش‌های آن (فقط در Backup
+  /// کامل). فایل‌های نسخه ۱ و ۲ همچنان خوانده می‌شوند؛ چون بخش مالی ندارند،
+  /// بازیابی آن‌ها دفتر مالی فعلی را لمس نمی‌کند.
+  static const int currentVersion = 3;
 
   final BackupType backupType;
   final int backupVersion;
@@ -150,6 +153,10 @@ class RestoreReport {
   int invoicesRenumbered = 0;
   int accountsAdded = 0;
   int accountsMatched = 0;
+  int financeAccountsAdded = 0;
+  int financeAccountsMatched = 0;
+  int financeTxAdded = 0;
+  int financeTxMatched = 0;
   bool settingsRestored = false;
   bool layoutRestored = false;
   bool stampRestored = false;
@@ -187,6 +194,12 @@ class RestoreReport {
     }
     if (accountsAdded > 0 || accountsMatched > 0) {
       b.writeln('شماره کارت/شبا: $accountsAdded جدید، $accountsMatched قبلاً موجود');
+    }
+    if (financeAccountsAdded > 0 || financeAccountsMatched > 0) {
+      b.writeln('حساب مالی فروش کالا: $financeAccountsAdded جدید، $financeAccountsMatched قبلاً موجود');
+    }
+    if (financeTxAdded > 0 || financeTxMatched > 0) {
+      b.writeln('تراکنش‌های مالی: $financeTxAdded جدید، $financeTxMatched قبلاً موجود');
     }
     if (settingsRestored) b.writeln('تنظیمات برنامه: بازیابی شد');
     if (layoutRestored) b.writeln('قالب فاکتور: بازیابی شد');
