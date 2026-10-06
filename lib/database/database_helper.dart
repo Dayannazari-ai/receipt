@@ -23,7 +23,10 @@ class DatabaseHelper {
   // finance_transactions برای «حساب مالی فروش کالا». هیچ جدول یا ستون
   // موجودی تغییر نمی‌کند. مانده‌ی حساب هرگز ذخیره نمی‌شود و همیشه از روی
   // تراکنش‌ها محاسبه می‌شود.
-  static const int dbVersion = 7;
+  // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
+  // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
+  // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
+  static const int dbVersion = 8;
 
   Database? _db;
 
@@ -172,7 +175,7 @@ class DatabaseHelper {
 
     // invoices: افزوده شده vehicle_id (اتصال اختیاری به خودرو) و backup_uid
     // (شناسه‌ی پایدار یکتا، مستقل از invoice_number، برای تشخیص دقیق فاکتور
-    // در عملیات Backup/Restore).
+    // در عملیات Backup/Restore) و finance_pay (تیک پرداخت از حساب فروش کالا).
     batch.execute('''
       CREATE TABLE invoices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,6 +193,7 @@ class DatabaseHelper {
         notes TEXT,
         is_deleted INTEGER NOT NULL DEFAULT 0,
         is_draft INTEGER NOT NULL DEFAULT 0,
+        finance_pay INTEGER NOT NULL DEFAULT 0,
         backup_uid TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id),
@@ -260,7 +264,7 @@ class DatabaseHelper {
     await batch.commit(noResult: true);
   }
 
-  /// جدول‌های حساب مالی فروش کالا (نسخه‌ی ۷). هم در نصب تازه و هم در
+  /// جدول‌های حساب مالی فروش کالا (نسخه‌ی ۷ و ۸). هم در نصب تازه و هم در
   /// ارتقا استفاده می‌شود. همه‌ی دستورها IF NOT EXISTS هستند تا اجرای
   /// مجدد بی‌خطر باشد.
   static const List<String> _financeSchema = [
@@ -299,6 +303,27 @@ class DatabaseHelper {
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_tx_uid ON finance_transactions(backup_uid)',
     // هر تراکنش حداکثر یک بار قابل اصلاح (معکوس‌شدن) است.
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_tx_reverses ON finance_transactions(reverses_id) WHERE reverses_id IS NOT NULL',
+    // نسخه‌ی ۸: چک‌های در انتظار وصول (تا وصول وارد مانده نمی‌شوند).
+    '''
+      CREATE TABLE IF NOT EXISTS finance_cheques (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        invoice_id INTEGER,
+        invoice_number TEXT,
+        direction TEXT NOT NULL,
+        amount REAL NOT NULL,
+        due_date TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        collected_tx_id INTEGER,
+        backup_uid TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES finance_accounts(id)
+      )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_fin_chq_status ON finance_cheques(status, due_date)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_chq_uid ON finance_cheques(backup_uid)',
+    // هر فاکتور حداکثر یک چک دارد.
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_chq_invoice ON finance_cheques(invoice_id) WHERE invoice_id IS NOT NULL',
   ];
 
   /// نصب موجود (کاربر قبلی): فقط ستون‌های جدید با ALTER TABLE اضافه می‌شوند.
@@ -387,6 +412,18 @@ class DatabaseHelper {
     if (oldVersion < 7) {
       // فقط دو جدول کاملاً جدید برای حساب مالی فروش کالا. هیچ جدول یا
       // ستون موجودی لمس نمی‌شود، پس داده‌ی قبلی تحت تأثیر قرار نمی‌گیرد.
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
+    }
+    if (oldVersion < 8) {
+      // ستون finance_pay با پیش‌فاکتور ۰: فاکتورهای قبلی بدون تغییر می‌مانند.
+      try {
+        await db.execute('ALTER TABLE invoices ADD COLUMN finance_pay INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+      // جدول چک‌ها (و بقیه‌ی دستورهای IF NOT EXISTS، که بی‌خطر تکرار می‌شوند).
       for (final sql in _financeSchema) {
         try {
           await db.execute(sql);
