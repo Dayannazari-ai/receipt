@@ -35,6 +35,7 @@ class InvoiceService {
   Future<String> nextInvoiceNumber(InvoiceType type) => _invoiceRepo.getNextInvoiceNumber(type);
 
   /// صدور فاکتور اصلی. [vehicleId] اختیاری است؛ فاکتور بدون خودرو هم مجاز است.
+  /// [financePay]: تیک «پرداخت از حساب فروش کالا» (فقط برای فاکتور خرید کالا).
   Future<int> issueInvoice({
     required InvoiceType type,
     int? customerId,
@@ -46,6 +47,7 @@ class InvoiceService {
     String? notes,
     DateTime? issueDateTime,
     String? checkDueDate,
+    bool financePay = false,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -88,11 +90,16 @@ class InvoiceService {
     final sideCostModels =
         sideCosts.map((c) => SideCost(invoiceId: 0, title: c.title, amount: c.amount)).toList();
 
-    return _invoiceRepo.createInvoice(invoice: invoice, items: items, sideCosts: sideCostModels);
+    return _invoiceRepo.createInvoice(
+      invoice: invoice,
+      items: items,
+      sideCosts: sideCostModels,
+      financePay: financePay,
+    );
   }
 
   /// ذخیره به‌عنوان پیش‌فاکتور. شماره از سری جداگانه‌ی DRAFT گرفته می‌شود و
-  /// هیچ اثری روی موجودی کالا یا stock_movements ندارد.
+  /// هیچ اثری روی موجودی کالا یا stock_movements (و حساب مالی) ندارد.
   Future<int> saveDraftInvoice({
     required InvoiceType type,
     int? customerId,
@@ -104,6 +111,7 @@ class InvoiceService {
     String? notes,
     DateTime? issueDateTime,
     String? checkDueDate,
+    bool financePay = false,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -151,12 +159,14 @@ class InvoiceService {
       items: items,
       sideCosts: sideCostModels,
       isDraft: true,
+      financePay: financePay,
     );
   }
 
   /// ویرایش کامل یک پیش‌فاکتور موجود. فقط روی رکوردی با is_draft = 1 کار
   /// می‌کند؛ در غیر این صورت استثنا پرتاب می‌شود. شماره‌ی پیش‌فاکتور با
-  /// ویرایش تغییر نمی‌کند.
+  /// ویرایش تغییر نمی‌کند. اگر [financePay] داده شود، تیک پرداخت از حساب
+  /// فروش کالا هم به‌روز می‌شود.
   Future<void> updateDraftInvoice({
     required int invoiceId,
     required InvoiceType type,
@@ -169,6 +179,7 @@ class InvoiceService {
     String? notes,
     required DateTime issueDateTime,
     String? checkDueDate,
+    bool? financePay,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -218,6 +229,7 @@ class InvoiceService {
       invoice: invoice,
       items: items,
       sideCosts: sideCostModels,
+      financePay: financePay,
     );
   }
 
