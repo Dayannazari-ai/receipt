@@ -649,6 +649,13 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
           ),
         ],
         const SizedBox(height: 12),
+        if (_type.isProductPurchase && _hasFinanceAccount)
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _financePay,
+            onChanged: (v) => setState(() => _financePay = v ?? false),
+            title: const Text('پرداخت از حساب فروش کالا'),
+          ),
         TextField(controller: _notesCtrl, decoration: const InputDecoration(labelText: 'توضیحات'), maxLines: 2),
         const SizedBox(height: 24),
         ElevatedButton(
