@@ -19,7 +19,11 @@ class DatabaseHelper {
   // خودرو) و ستون‌های invoices.vehicle_id (اتصال اختیاری فاکتور به خودرو)
   // و invoices.backup_uid (شناسه‌ی پایدار و یکتا برای تشخیص دقیق فاکتور
   // در عملیات Backup/Restore، مستقل از invoice_number).
-  static const int dbVersion = 6;
+  // نسخه ۷: افزودن دو جدول کاملاً جدید finance_accounts و
+  // finance_transactions برای «حساب مالی فروش کالا». هیچ جدول یا ستون
+  // موجودی تغییر نمی‌کند. مانده‌ی حساب هرگز ذخیره نمی‌شود و همیشه از روی
+  // تراکنش‌ها محاسبه می‌شود.
+  static const int dbVersion = 7;
 
   Database? _db;
 
@@ -249,8 +253,53 @@ class DatabaseHelper {
       )
     ''');
 
+    for (final sql in _financeSchema) {
+      batch.execute(sql);
+    }
+
     await batch.commit(noResult: true);
   }
+
+  /// جدول‌های حساب مالی فروش کالا (نسخه‌ی ۷). هم در نصب تازه و هم در
+  /// ارتقا استفاده می‌شود. همه‌ی دستورها IF NOT EXISTS هستند تا اجرای
+  /// مجدد بی‌خطر باشد.
+  static const List<String> _financeSchema = [
+    '''
+      CREATE TABLE IF NOT EXISTS finance_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        account_type TEXT NOT NULL DEFAULT 'goods_sales',
+        card_number TEXT,
+        start_date TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''',
+    '''
+      CREATE TABLE IF NOT EXISTS finance_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        occurred_at TEXT NOT NULL,
+        tx_type TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        invoice_id INTEGER,
+        invoice_number TEXT,
+        counterparty TEXT,
+        notes TEXT,
+        reverses_id INTEGER,
+        correction_reason TEXT,
+        backup_uid TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES finance_accounts(id)
+      )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_fin_tx_account ON finance_transactions(account_id, occurred_at)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_tx_uid ON finance_transactions(backup_uid)',
+    // هر تراکنش حداکثر یک بار قابل اصلاح (معکوس‌شدن) است.
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_tx_reverses ON finance_transactions(reverses_id) WHERE reverses_id IS NOT NULL',
+  ];
 
   /// نصب موجود (کاربر قبلی): فقط ستون‌های جدید با ALTER TABLE اضافه می‌شوند.
   /// هیچ جدولی حذف یا بازسازی نمی‌شود و هیچ داده‌ای از بین نمی‌رود.
@@ -334,6 +383,15 @@ class DatabaseHelper {
       try {
         await db.execute('CREATE UNIQUE INDEX idx_invoices_backup_uid ON invoices(backup_uid)');
       } catch (_) {}
+    }
+    if (oldVersion < 7) {
+      // فقط دو جدول کاملاً جدید برای حساب مالی فروش کالا. هیچ جدول یا
+      // ستون موجودی لمس نمی‌شود، پس داده‌ی قبلی تحت تأثیر قرار نمی‌گیرد.
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
     }
   }
 
