@@ -13,6 +13,8 @@ import '../../repositories/customer_repository.dart';
 import '../../repositories/product_repository.dart';
 import '../../repositories/service_repository.dart';
 import '../../repositories/vehicle_repository.dart';
+import '../../repositories/finance_repository.dart';
+import '../../repositories/invoice_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
 import '../../repositories/payment_account_repository.dart';
 import '../../repositories/settings_repository.dart';
@@ -71,6 +73,8 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   late final List<InvoiceCartLine> _lines;
   late final List<SideCostLine> _sideCosts;
   bool _saving = false;
+  bool _hasFinanceAccount = false;
+  bool _financePay = false;
   bool _loadingInitial = true;
   late DateTime _issueDateTime;
 
@@ -122,6 +126,8 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   Future<void> _init() async {
     final settings = await _settingsRepo.getSettings();
     final accounts = await _paymentRepo.getAll();
+    final hasFinance = await FinanceRepository().getGoodsSalesAccount() != null;
+    final financePay = await InvoiceRepository().getFinancePay(widget.invoice.id!);
     if (widget.invoice.customerId != null) {
       final customer = await _customerRepo.getById(widget.invoice.customerId!);
       if (customer != null) {
@@ -143,6 +149,8 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     setState(() {
       _settings = settings;
       _accounts = accounts;
+      _hasFinanceAccount = hasFinance;
+      _financePay = financePay;
       _selectedAccount = selectedAccount;
       _selectedVehicle = vehicle;
       _selectedVehicleLabel = vehicleLabel;
@@ -423,6 +431,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
           : null;
 
       await _invoiceService.updateDraftInvoice(
+        financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         invoiceId: widget.invoice.id!,
         type: _type,
         customerId: customerId,
