@@ -15,6 +15,7 @@ import '../../repositories/service_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
 import '../../repositories/payment_account_repository.dart';
 import '../../repositories/settings_repository.dart';
+import '../../repositories/finance_repository.dart';
 import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
@@ -59,6 +60,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   bool _issuing = false;
   bool _loadingInitial = true;
   String _nextInvoiceNumber = '';
+  bool _hasFinanceAccount = false;
+  bool _financePay = true;
   DateTime _issueDateTime = DateTime.now();
 
   @override
@@ -70,11 +73,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _init() async {
     final settings = await _settingsRepo.getSettings();
     final accounts = await _paymentRepo.getAll();
+    final hasFinance = await FinanceRepository().getGoodsSalesAccount() != null;
     final nextNum = await _invoiceService.nextInvoiceNumber(_type);
     if (!mounted) return;
     setState(() {
       _settings = settings;
       _accounts = accounts;
+      _hasFinanceAccount = hasFinance;
+      _financePay = hasFinance;
       _nextInvoiceNumber = nextNum;
       _loadingInitial = false;
     });
@@ -435,6 +441,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           : null;
 
       final invoiceId = await _invoiceService.issueInvoice(
+        financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         type: _type,
         customerId: customerId,
         vehicleId: vehicleId,
@@ -473,6 +480,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           : null;
 
       await _invoiceService.saveDraftInvoice(
+        financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         type: _type,
         customerId: customerId,
         vehicleId: vehicleId,
@@ -729,6 +737,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           ),
         ],
         const SizedBox(height: 12),
+        if (_type.isProductPurchase && _hasFinanceAccount)
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _financePay,
+            onChanged: (v) => setState(() => _financePay = v ?? false),
+            title: const Text('پرداخت از حساب فروش کالا'),
+          ),
         TextField(controller: _notesCtrl, decoration: const InputDecoration(labelText: 'توضیحات'), maxLines: 2),
         const SizedBox(height: 24),
         ElevatedButton(
