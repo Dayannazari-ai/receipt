@@ -77,7 +77,7 @@ class BackupEnvelope {
   /// نسخه ۳: افزوده شدن حساب مالی فروش کالا و تراکنش‌های آن (فقط در Backup
   /// کامل). فایل‌های نسخه ۱ و ۲ همچنان خوانده می‌شوند؛ چون بخش مالی ندارند،
   /// بازیابی آن‌ها دفتر مالی فعلی را لمس نمی‌کند.
-  static const int currentVersion = 3;
+  static const int currentVersion = 4;
 
   final BackupType backupType;
   final int backupVersion;
@@ -157,6 +157,8 @@ class RestoreReport {
   int financeAccountsMatched = 0;
   int financeTxAdded = 0;
   int financeTxMatched = 0;
+  int financeChequesAdded = 0;
+  int financeChequesMatched = 0;
   bool settingsRestored = false;
   bool layoutRestored = false;
   bool stampRestored = false;
@@ -200,6 +202,9 @@ class RestoreReport {
     }
     if (financeTxAdded > 0 || financeTxMatched > 0) {
       b.writeln('تراکنش‌های مالی: $financeTxAdded جدید، $financeTxMatched قبلاً موجود');
+    }
+    if (financeChequesAdded > 0 || financeChequesMatched > 0) {
+      b.writeln('چک‌های مالی: $financeChequesAdded جدید، $financeChequesMatched قبلاً موجود');
     }
     if (settingsRestored) b.writeln('تنظیمات برنامه: بازیابی شد');
     if (layoutRestored) b.writeln('قالب فاکتور: بازیابی شد');
