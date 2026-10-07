@@ -9,7 +9,10 @@ import '../../utils/persian_date.dart';
 import 'invoice_detail_screen.dart';
 
 class InvoicesScreen extends StatefulWidget {
-  const InvoicesScreen({super.key});
+  /// [embedded]: وقتی true باشد (داخل تب «فاکتورها»ی صفحه‌ی گزارش) فقط نوار
+  /// تب‌ها نشان داده می‌شود و نوار عنوان مخفی است. رفتار صفحه تغییری نمی‌کند.
+  final bool embedded;
+  const InvoicesScreen({super.key, this.embedded = false});
   @override
   State<InvoicesScreen> createState() => _InvoicesScreenState();
 }
@@ -66,6 +69,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> with SingleTickerProvid
 
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: widget.embedded ? 0 : null,
         title: const Text('تراکنش‌ها'),
         bottom: TabBar(controller: _tab, tabs: const [
           Tab(text: 'فاکتور فروش'),
