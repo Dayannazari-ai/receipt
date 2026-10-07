@@ -5,7 +5,7 @@ import 'receipt/receipt_screen.dart';
 import 'customers/customers_screen.dart';
 import 'products/products_screen.dart';
 import 'services/services_screen.dart';
-import 'invoices/invoices_screen.dart';
+import 'reports/reports_screen.dart';
 import 'settings/settings_screen.dart';
 
 enum _FailAction { cancel, retry, changePath }
@@ -31,18 +31,18 @@ class _HomeShellState extends State<HomeShell> {
     CustomersScreen(),
     ProductsScreen(),
     ServicesScreen(),
-    InvoicesScreen(),
+    ReportsScreen(),
     ReceiptScreen(),
   ];
 
-  final _titles = const ['تنظیمات', 'مشتریان', 'محصولات', 'خدمات', 'فاکتورها', 'رسید'];
+  final _titles = const ['تنظیمات', 'مشتریان', 'محصولات', 'خدمات', 'گزارش', 'رسید'];
 
   final _icons = const [
     Icons.settings_outlined,
     Icons.person_outline,
     Icons.shopping_cart_outlined,
     Icons.build_outlined,
-    Icons.description_outlined,
+    Icons.bar_chart_outlined,
     Icons.add_shopping_cart,
   ];
 
