@@ -26,7 +26,7 @@ class DatabaseHelper {
   // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
   // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
   // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
-  static const int dbVersion = 8;
+  static const int dbVersion = 9;
 
   Database? _db;
 
@@ -324,6 +324,21 @@ class DatabaseHelper {
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_chq_uid ON finance_cheques(backup_uid)',
     // هر فاکتور حداکثر یک چک دارد.
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_chq_invoice ON finance_cheques(invoice_id) WHERE invoice_id IS NOT NULL',
+    // نسخه‌ی ۹: هزینه‌های خدماتی (ثبت دستی، مستقل از حساب فروش کالا).
+    '''
+      CREATE TABLE IF NOT EXISTS service_expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        expense_date TEXT NOT NULL,
+        title TEXT NOT NULL,
+        amount REAL NOT NULL,
+        category TEXT NOT NULL DEFAULT 'other',
+        notes TEXT,
+        backup_uid TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_service_exp_date ON service_expenses(expense_date)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_service_exp_uid ON service_expenses(backup_uid)',
   ];
 
   /// نصب موجود (کاربر قبلی): فقط ستون‌های جدید با ALTER TABLE اضافه می‌شوند.
@@ -412,6 +427,14 @@ class DatabaseHelper {
     if (oldVersion < 7) {
       // فقط دو جدول کاملاً جدید برای حساب مالی فروش کالا. هیچ جدول یا
       // ستون موجودی لمس نمی‌شود، پس داده‌ی قبلی تحت تأثیر قرار نمی‌گیرد.
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
+    }
+    if (oldVersion < 9) {
+      // نسخه ۹: جدول هزینه‌های خدماتی. جدول کاملاً جدید است و داده‌ی قبلی لمس نمی‌شود.
       for (final sql in _financeSchema) {
         try {
           await db.execute(sql);
