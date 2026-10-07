@@ -13,8 +13,6 @@ import '../../main.dart';
 import 'price_list_import_screen.dart';
 import 'invoice_template_settings_screen.dart';
 import 'backup_restore_screen.dart';
-import '../finance/finance_account_setup_screen.dart';
-import '../finance/finance_ledger_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -432,27 +430,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               )),
           OutlinedButton.icon(icon: const Icon(Icons.add), label: const Text('افزودن کارت/شبا'), onPressed: _addAccount),
-          const SizedBox(height: 28),
-          const Divider(),
-          const SizedBox(height: 12),
-          const Text('حساب مالی فروش کالا', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-          const SizedBox(height: 6),
-          const Text('دفتر مالی مستقل برای فروشگاه کالا، جدا از درآمد خدمات تعمیرگاهی.',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.account_balance_wallet_outlined),
-            label: const Text('تعریف / ویرایش حساب مالی فروش کالا'),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const FinanceAccountSetupScreen())),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.receipt_long_outlined),
-            label: const Text('گردش مالی فروش کالا'),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const FinanceLedgerScreen())),
-          ),
 
           const SizedBox(height: 28),
           const Divider(),
