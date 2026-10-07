@@ -84,6 +84,16 @@ jobs:
           done
       - name: Build APK
         run: flutter build apk --release --no-shrink --build-number=${{ github.run_number }}
+      - name: Show signing fingerprint and versionCode (diagnostic)
+        run: |
+          echo "---- stored keystore fingerprint ----"
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android 2>&1 | grep -iE "SHA-?256" || true
+          APKSIGNER=$(ls -d $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          echo "---- APK signer fingerprint ----"
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -iE "SHA-?256" || true
+          AAPT=$(ls -d $ANDROID_HOME/build-tools/*/aapt 2>/dev/null | sort -V | tail -1)
+          echo "---- APK package / versionCode ----"
+          "$AAPT" dump badging build/app/outputs/flutter-apk/app-release.apk 2>&1 | grep -E "^package:" || true
       - name: Check R8 mapping (diagnostic)
         run: |
           ls -la build/app/outputs/mapping/release 2>&1 || echo "no mapping dir - R8 did not run"
