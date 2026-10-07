@@ -8,7 +8,9 @@ import 'finance_repository.dart';
 /// اتصال فاکتورهای صادرشده به «حساب مالی فروش کالا».
 ///
 /// قواعد:
-/// - فقط «کالا» وارد حساب می‌شود؛ سهم خدمات هیچ اثری ندارد.
+/// - فقط «کالا» وارد حساب می‌شود؛ سهم خدمات هیچ اثری ندارد. این شامل
+///   ردیف‌های کالا داخل فاکتور خدماتی (برق/مکانیک/جلوبندی) هم می‌شود؛ در
+///   این فاکتورها هزینه‌ی جانبی وارد حساب کالا نمی‌شود.
 /// - فاکتور فروش کالا (SL) همیشه ورودی می‌سازد. فاکتور خرید کالا (PR) فقط
 ///   وقتی خروجی می‌سازد که تیک «پرداخت از حساب فروش کالا» روشن باشد.
 /// - هزینه‌های جانبی فروش = ورودی (سایر درآمدها)، خرید = خروجی (هزینه متفرقه).
@@ -137,8 +139,10 @@ class FinanceInvoicePosting {
     if ((inv['is_draft'] as int? ?? 0) == 1) return;
 
     final type = inv['type'] as String?;
-    final isSale = type == 'productSale';
     final isPurchase = type == 'productPurchase';
+    // فاکتور خدماتی که داخلش کالا هم هست: فقط سهم کالا مثل فروش وارد حساب می‌شود.
+    final isServiceType = type == 'electrical' || type == 'mechanic' || type == 'suspension';
+    final isSale = type == 'productSale' || isServiceType;
     if (!isSale && !isPurchase) return;
     if (isPurchase && (inv['finance_pay'] as int? ?? 0) != 1) return;
 
@@ -157,7 +161,9 @@ class FinanceInvoicePosting {
 
     final goods = await _goodsTotal(txn, invoiceId);
     if (goods <= 0) return;
-    final sides = await txn.query('side_costs', where: 'invoice_id = ?', whereArgs: [invoiceId]);
+    final sides = isServiceType
+        ? <Map<String, Object?>>[]
+        : await txn.query('side_costs', where: 'invoice_id = ?', whereArgs: [invoiceId]);
 
     if (inv['payment_type'] == 'nonCash') {
       var total = goods;
@@ -219,10 +225,14 @@ class FinanceInvoicePosting {
           : await txn.query('invoices', where: 'id = ?', whereArgs: [cheque.invoiceId], limit: 1);
       if (invRows.isEmpty) throw StateError('فاکتور این چک یافت نشد');
       final inv = invRows.first;
-      final isSale = inv['type'] == 'productSale';
+      final invType = inv['type'] as String?;
+      final isSale = invType != 'productPurchase';
+      final isGoodsInvoice = invType == 'productSale' || invType == 'productPurchase';
 
       final goods = await _goodsTotal(txn, cheque.invoiceId!);
-      final sides = await txn.query('side_costs', where: 'invoice_id = ?', whereArgs: [cheque.invoiceId]);
+      final sides = isGoodsInvoice
+          ? await txn.query('side_costs', where: 'invoice_id = ?', whereArgs: [cheque.invoiceId])
+          : <Map<String, Object?>>[];
       final firstId = await _postEntries(txn,
           accountId: account.id!, inv: inv, isSale: isSale, goods: goods, sides: sides, at: collectedAt);
 
