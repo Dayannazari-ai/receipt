@@ -11,6 +11,7 @@ import '../models/invoice_layout_settings.dart';
 import '../repositories/finance_repository.dart';
 import '../repositories/invoice_repository.dart';
 import 'invoice_layout_storage.dart';
+import 'service_expense_backup.dart';
 
 /// نگاشت شناسه‌ی قدیمی (داخل فایل Backup) به شناسه‌ی جدید/موجود در دیتابیس
 /// مقصد، برای برندها و مدل‌های خودرو.
@@ -330,6 +331,9 @@ class BackupService {
       'finance_transactions': financeTx,
       'finance_cheques': financeCheques,
     }..addAll(settingsData);
+    final serviceExpenses = await db.query('service_expenses');
+    data['service_expenses'] = serviceExpenses;
+    counts['service_expenses'] = serviceExpenses.length;
 
     final envelope = BackupEnvelope(
       backupType: BackupType.full,
@@ -1125,6 +1129,7 @@ class BackupService {
           await _mergeFinance(txn, _list(data, 'finance_accounts'), _list(data, 'finance_transactions'), report);
           await _mergeFinanceCheques(
               txn, _list(data, 'finance_cheques'), _list(data, 'finance_transactions'), report);
+          await mergeServiceExpenses(txn, _list(data, 'service_expenses'), report);
           await _restoreSettingsPart(txn, data, report, overwriteValues: false, replaceAccounts: false);
           report.notes.add('در حالت «افزودن»، تنظیمات برنامه تغییر نکرد.');
           break;
@@ -1218,7 +1223,8 @@ class BackupService {
             break;
 
           case BackupType.settings:
-            await _restoreSettingsPart(txn, data, report, overwriteValues: true, replaceAccounts: false);
+            await replaceServiceExpenses(txn, data, report);
+            await _restoreSettingsPart(txn, data, report, overwriteValues: true, replaceAccounts: true);
             break;
 
           case BackupType.full:
