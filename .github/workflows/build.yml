@@ -84,6 +84,12 @@ jobs:
           done
       - name: Build APK
         run: flutter build apk --release --no-shrink --build-number=${{ github.run_number }}
+      - name: Re-sign release APK with the stored key (build used a different key)
+        run: |
+          APKSIGNER=$(ls -d $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          "$APKSIGNER" sign --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey "$APK"
+          "$APKSIGNER" verify --print-certs "$APK" | grep -iE "SHA-?256"
       - name: Show signing fingerprint and versionCode (diagnostic)
         run: |
           echo "---- stored keystore fingerprint ----"
