@@ -10,6 +10,7 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../../utils/thousands_input_formatter.dart';
 import 'finance_account_setup_screen.dart';
+import 'finance_cheques_screen.dart';
 import 'finance_transaction_form_screen.dart';
 
 /// صفحه‌ی «گردش مالی فروش کالا». مانده، موجودی قبل و موجودی بعد همگی
@@ -122,6 +123,11 @@ class _FinanceLedgerScreenState extends State<FinanceLedgerScreen> {
     final changed = await Navigator.of(context)
         .push<bool>(MaterialPageRoute(builder: (_) => const FinanceAccountSetupScreen()));
     if (changed == true) _load();
+  }
+
+  Future<void> _openCheques() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FinanceChequesScreen()));
+    _load();
   }
 
   Future<void> _openForm() async {
@@ -443,6 +449,8 @@ class _FinanceLedgerScreenState extends State<FinanceLedgerScreen> {
       appBar: AppBar(title: const Text('گردش مالی فروش کالا'), actions: [
         if (_account != null)
           IconButton(icon: const Icon(Icons.settings_outlined), tooltip: 'تنظیم حساب', onPressed: _openSetup),
+        if (_account != null)
+          IconButton(icon: const Icon(Icons.receipt_long_outlined), tooltip: 'چک‌ها', onPressed: _openCheques),
         IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
       ]),
       body: _body(),
