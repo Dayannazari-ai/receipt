@@ -19,7 +19,9 @@ import '../finance/finance_ledger_screen.dart';
 /// گزارش مالی همان دفتر «حساب مالی فروش کالا» (FinanceRepository) را می‌خواند؛
 /// سیستم موازی ساخته نشده است.
 class ReportsPanel extends StatefulWidget {
-  const ReportsPanel({super.key});
+  /// false = تب «مالی خدمات»، true = تب «مالی کالا».
+  final bool goods;
+  const ReportsPanel({super.key, required this.goods});
   @override
   State<ReportsPanel> createState() => _ReportsPanelState();
 }
@@ -30,7 +32,6 @@ class _ReportsPanelState extends State<ReportsPanel> {
   final _settingsRepo = SettingsRepository();
 
   ReportPeriod _period = ReportPeriod.of(PeriodKind.monthly, DateTime.now());
-  int _section = 0; // 0 = گزارش فاکتورها، 1 = گزارش مالی
   Currency _currency = Currency.toman;
   bool _loading = true;
 
@@ -242,50 +243,32 @@ class _ReportsPanelState extends State<ReportsPanel> {
 
   // ==================== گزارش فاکتورها ====================
 
-  Widget _invoiceSection() {
-    if (_invoiceRows.isEmpty) {
-      return _card('گزارش فاکتورها', [
-        const Padding(padding: EdgeInsets.all(16), child: Center(child: Text('در این بازه فاکتوری ثبت نشده است'))),
+  Widget _invoiceSection({required bool goods}) {
+    final byType = {for (final r in _invoiceRows) r.type: r};
+    final types = goods ? const ['productSale', 'productPurchase'] : _serviceTypes;
+    final rows = <InvoiceTypeTotal>[
+      for (final t in types)
+        if (byType[t] != null) byType[t]!,
+    ];
+    final title = goods ? 'فاکتورهای کالا در این بازه' : 'فاکتورهای خدمات در این بازه';
+    if (rows.isEmpty) {
+      return _card(title, [
+        const Padding(padding: EdgeInsets.all(12), child: Center(child: Text('در این بازه فاکتوری ثبت نشده است'))),
       ]);
     }
-    final byType = {for (final r in _invoiceRows) r.type: r};
-    double tot(List<String> ts) => ts.fold<double>(0.0, (a, t) => a + (byType[t]?.total ?? 0.0));
-    int cnt(List<String> ts) => ts.fold<int>(0, (a, t) => a + (byType[t]?.count ?? 0));
-
-    const sales = ['productSale'];
-    const purchases = ['productPurchase'];
-    final allSales = [...sales, ..._serviceTypes];
-    final allTypes = [...allSales, ...purchases];
-
-    final green = Colors.green.shade700;
-    final red = Colors.red.shade700;
-
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _card('خلاصه‌ی فاکتورها', [
-        _kv('تعداد کل فاکتورها', _n(cnt(allTypes))),
-        _kv('جمع فاکتورهای فروش (کالا + خدمات)', _money(tot(allSales)), color: green, bold: true),
-        _kv('جمع فاکتورهای خرید کالا', _money(tot(purchases)), color: red, bold: true),
-      ]),
-      _card('فروش کالا', [
-        _kv('تعداد فاکتور', _n(cnt(sales))),
-        _kv('جمع مبلغ', _money(tot(sales)), bold: true),
-      ]),
-      _card('خرید کالا', [
-        _kv('تعداد فاکتور', _n(cnt(purchases))),
-        _kv('جمع مبلغ', _money(tot(purchases)), bold: true),
-      ]),
-      _card('خدمات', [
-        _kv('تعداد فاکتور', _n(cnt(_serviceTypes))),
-        _kv('جمع مبلغ', _money(tot(_serviceTypes)), bold: true),
-        for (final t in _serviceTypes)
-          if (byType[t] != null)
-            _kv('${_typeLabels[t]} — ${_n(byType[t]!.count)} فاکتور', _money(byType[t]!.total), indent: 12),
-      ]),
-      const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 4),
-        child: Text('مبالغ بر اساس مبلغ نهایی فاکتورهای اصلی (بدون پیش‌فاکتور) و تاریخ صدور محاسبه شده است.',
-            style: TextStyle(fontSize: 11, color: Colors.grey)),
-      ),
+    final total = rows.fold<double>(0.0, (a, r) => a + r.total);
+    final count = rows.fold<int>(0, (a, r) => a + r.count);
+    return _card(title, [
+      _kv('تعداد فاکتور', _n(count)),
+      for (final r in rows)
+        _kv('${_typeLabels[r.type] ?? r.type} — ${_n(r.count)} فاکتور', _money(r.total), indent: 12),
+      if (!goods) ...[
+        const Divider(),
+        _kv('جمع مبلغ فاکتورها', _money(total), bold: true),
+      ],
+      const SizedBox(height: 4),
+      const Text('بر اساس مبلغ نهایی فاکتورهای اصلی (بدون پیش‌فاکتور) و تاریخ صدور.',
+          style: TextStyle(fontSize: 11, color: Colors.grey)),
     ]);
   }
 
@@ -343,7 +326,8 @@ class _ReportsPanelState extends State<ReportsPanel> {
       return '${_n(c)} چک — ${_money(t)}';
     }
 
-    return _card('حساب فروش کالا — ${account.name}', [
+    return _card('حساب فروش کالا', [
+      _kv('نام حساب', account.name),
       _kv('موجودی اول دوره', _money(f.opening)),
       const Divider(),
       _kv('مجموع ورودی‌ها', _money(f.totalIn), color: green, bold: true),
@@ -367,6 +351,12 @@ class _ReportsPanelState extends State<ReportsPanel> {
         icon: const Icon(Icons.receipt_long_outlined),
         label: const Text('مشاهده‌ی دفتر کامل گردش'),
         onPressed: _openLedger,
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.account_balance_wallet_outlined),
+        label: const Text('تنظیم حساب مالی فروش کالا'),
+        onPressed: _openAccountSetup,
       ),
     ]);
   }
@@ -538,17 +528,9 @@ class _ReportsPanelState extends State<ReportsPanel> {
         children: [
           _periodBar(),
           const SizedBox(height: 8),
-          SegmentedButton<int>(
-            segments: const [
-              ButtonSegment<int>(value: 0, label: Text('گزارش فاکتورها')),
-              ButtonSegment<int>(value: 1, label: Text('گزارش مالی')),
-            ],
-            selected: {_section},
-            onSelectionChanged: (s) => setState(() => _section = s.first),
-          ),
-          const SizedBox(height: 8),
           if (_loading) const LinearProgressIndicator(),
-          if (_section == 0) _invoiceSection() else ...[_goodsCard(), _serviceCard()],
+          if (widget.goods) _goodsCard() else _serviceCard(),
+          _invoiceSection(goods: widget.goods),
         ],
       ),
     );
