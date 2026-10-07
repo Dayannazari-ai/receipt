@@ -45,6 +45,7 @@ class _RefMaps {
 /// دفتر مالی فعلی را دست نمی‌زند.
 class BackupService {
   final _db = DatabaseHelper.instance;
+  Map<int, int> _lastInvoiceIdMap = {};
 
   // ==================== Export ====================
 
@@ -293,6 +294,7 @@ class BackupService {
     final sideCosts = await db.query('side_costs');
     final financeAccounts = await db.query('finance_accounts');
     final financeTx = await db.query('finance_transactions');
+    final financeCheques = await db.query('finance_cheques');
     final settingsData = await _collectSettingsData(db);
 
     final counts = <String, int>{
@@ -309,6 +311,7 @@ class BackupService {
       'side_costs': sideCosts.length,
       'finance_accounts': financeAccounts.length,
       'finance_transactions': financeTx.length,
+      'finance_cheques': financeCheques.length,
     }..addAll(_settingsCounts(settingsData));
 
     final data = <String, dynamic>{
@@ -325,6 +328,7 @@ class BackupService {
       'side_costs': sideCosts,
       'finance_accounts': financeAccounts,
       'finance_transactions': financeTx,
+      'finance_cheques': financeCheques,
     }..addAll(settingsData);
 
     final envelope = BackupEnvelope(
@@ -705,6 +709,7 @@ class BackupService {
     RestoreReport report,
   ) async {
     final invoiceIdMap = <int, int>{}; // id قدیمی (در فایل) -> id جدید در مقصد
+    _lastInvoiceIdMap = invoiceIdMap;
     final freshlyInsertedOldIds = <int>{};
 
     for (final rawInv in rawInvoices) {
@@ -731,6 +736,7 @@ class BackupService {
         if (sameContent) {
           // Duplicate واقعی: Import نمی‌شود (و اقلامش هم وارد نمی‌شود).
           report.invoicesSkippedDuplicate++;
+          if (oldId != null) invoiceIdMap[oldId] = existing['id'] as int;
           continue;
         } else {
           // شماره یکسان ولی فاکتور متفاوت: با شماره‌ی جدید از سری واقعی
@@ -859,7 +865,7 @@ class BackupService {
       }
 
       final newId = await _insertRaw(txn, 'finance_transactions', t,
-          fkMappings: {'account_id': accountIdMap, 'reverses_id': txIdMap});
+          fkMappings: {'account_id': accountIdMap, 'reverses_id': txIdMap, 'invoice_id': _lastInvoiceIdMap});
       if (oldId != null) txIdMap[oldId] = newId;
       report.financeTxAdded++;
     }
@@ -870,8 +876,69 @@ class BackupService {
     }
   }
 
-  // ==================== تنظیمات (مشترک بین Merge/Replace/نوع settings) ====================
+  /// ادغام چک‌های حساب مالی (فقط Backup کامل). چک‌ها با backup_uid تطبیق
+  /// می‌خورند؛ شناسه‌ی فاکتور و تراکنش وصول به شناسه‌های مقصد نگاشت می‌شوند.
+  Future<void> _mergeFinanceCheques(
+    Transaction txn,
+    List<dynamic> rawCheques,
+    List<dynamic> rawTx,
+    RestoreReport report,
+  ) async {
+    if (rawCheques.isEmpty) return;
+    final accRows = await txn.query('finance_accounts',
+        where: 'account_type = ?', whereArgs: ['goods_sales'], orderBy: 'id ASC', limit: 1);
+    if (accRows.isEmpty) {
+      report.notes.add('چک‌های مالی به دلیل نبود حساب فروش کالا نادیده گرفته شد.');
+      return;
+    }
+    final accountId = accRows.first['id'] as int;
 
+    final uidByOldTxId = <int, String>{};
+    for (final rawT in rawTx) {
+      final t = Map<String, dynamic>.from(rawT as Map);
+      final id = _asIntOrNull(t['id']);
+      final uid = (t['backup_uid'] as String?)?.trim() ?? '';
+      if (id != null && uid.isNotEmpty) uidByOldTxId[id] = uid;
+    }
+
+    for (final rawC in rawCheques) {
+      final c = Map<String, dynamic>.from(rawC as Map);
+      final uid = (c['backup_uid'] as String?)?.trim() ?? '';
+      if (uid.isNotEmpty) {
+        final rows = await txn.query('finance_cheques', where: 'backup_uid = ?', whereArgs: [uid], limit: 1);
+        if (rows.isNotEmpty) {
+          report.financeChequesMatched++;
+          continue;
+        }
+      } else {
+        c['backup_uid'] = FinanceRepository.generateUid().replaceFirst('fin-', 'chq-');
+      }
+      final oldInv = _asIntOrNull(c['invoice_id']);
+      final newInv = oldInv == null ? null : (_lastInvoiceIdMap[oldInv] ?? oldInv);
+      if (newInv != null) {
+        final dup = await txn.query('finance_cheques', where: 'invoice_id = ?', whereArgs: [newInv], limit: 1);
+        if (dup.isNotEmpty) {
+          report.financeChequesMatched++;
+          continue;
+        }
+      }
+      c['invoice_id'] = newInv;
+      c['account_id'] = accountId;
+      final oldTx = _asIntOrNull(c['collected_tx_id']);
+      if (oldTx != null) {
+        final uidTx = uidByOldTxId[oldTx];
+        int? newTx;
+        if (uidTx != null) {
+          final r = await txn.query('finance_transactions',
+              where: 'backup_uid = ?', whereArgs: [uidTx], limit: 1);
+          if (r.isNotEmpty) newTx = r.first['id'] as int;
+        }
+        c['collected_tx_id'] = newTx;
+      }
+      await _insertRaw(txn, 'finance_cheques', c);
+      report.financeChequesAdded++;
+    }
+  }
   /// بخش دیتابیسیِ تنظیمات، داخل تراکنش:
   /// - [overwriteValues]: مقادیر تنظیمات (فقط کلیدهای شناخته‌شده) بازنویسی شوند.
   /// - [replaceAccounts]: حساب‌های پرداخت کاملاً جایگزین شوند (وگرنه فقط
@@ -1056,6 +1123,8 @@ class BackupService {
             report,
           );
           await _mergeFinance(txn, _list(data, 'finance_accounts'), _list(data, 'finance_transactions'), report);
+          await _mergeFinanceCheques(
+              txn, _list(data, 'finance_cheques'), _list(data, 'finance_transactions'), report);
           await _restoreSettingsPart(txn, data, report, overwriteValues: false, replaceAccounts: false);
           report.notes.add('در حالت «افزودن»، تنظیمات برنامه تغییر نکرد.');
           break;
@@ -1168,6 +1237,7 @@ class BackupService {
             // دست‌نخورده می‌گذارند).
             final hasFinance = data['finance_accounts'] is List;
             if (hasFinance) {
+              await txn.delete('finance_cheques');
               await txn.delete('finance_transactions');
               await txn.delete('finance_accounts');
             }
@@ -1230,6 +1300,12 @@ class BackupService {
               }
             }
             await _cleanupOrphanStockMovements(txn, report);
+            if (data['finance_cheques'] is List) {
+              for (final rawQ in _list(data, 'finance_cheques')) {
+                await _insertRaw(txn, 'finance_cheques', Map<String, dynamic>.from(rawQ as Map), keepId: true);
+                report.financeChequesAdded++;
+              }
+            }
             await _restoreSettingsPart(txn, data, report, overwriteValues: true, replaceAccounts: true);
             break;
         }
@@ -1292,6 +1368,7 @@ class BackupService {
       'stamp_image': 'عکس مهر/امضا',
       'finance_accounts': 'حساب مالی فروش کالا',
       'finance_transactions': 'تراکنش‌های مالی فروش کالا',
+      'finance_cheques': 'چک‌های حساب مالی فروش کالا',
     };
     return labels[key] ?? key;
   }
@@ -1463,6 +1540,7 @@ class BackupService {
         if (env.data['vehicle_brands'] is List) tables.addAll(['vehicle_brands', 'vehicle_models']);
         if (env.data['payment_accounts'] is List) tables.add('payment_accounts');
         if (env.data['finance_accounts'] is List) tables.addAll(['finance_accounts', 'finance_transactions']);
+        if (env.data['finance_cheques'] is List) tables.add('finance_cheques');
         break;
     }
     final issues = <String>[];
