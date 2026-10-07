@@ -3,7 +3,7 @@ import '../invoices/invoices_screen.dart';
 import 'reports_panel.dart';
 
 /// صفحه‌ی «گزارش» (جای قبلیِ «فاکتورها» در نوار پایین).
-/// تب اول: همان صفحه‌ی فاکتورها. تب دوم: گزارش‌ها (گزارش فاکتورها و گزارش مالی).
+/// تب‌ها: «فاکتورها» (همان صفحه‌ی قبلی)، «مالی خدمات» و «مالی کالا».
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
   @override
@@ -16,7 +16,7 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -32,14 +32,16 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
         title: const Text('گزارش'),
         bottom: TabBar(controller: _tab, tabs: const [
           Tab(text: 'فاکتورها'),
-          Tab(text: 'گزارش'),
+          Tab(text: 'مالی خدمات'),
+          Tab(text: 'مالی کالا'),
         ]),
       ),
       body: TabBarView(
         controller: _tab,
         children: const [
           InvoicesScreen(embedded: true),
-          ReportsPanel(),
+          ReportsPanel(goods: false),
+          ReportsPanel(goods: true),
         ],
       ),
     );
