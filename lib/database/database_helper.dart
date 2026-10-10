@@ -26,7 +26,7 @@ class DatabaseHelper {
   // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
   // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
   // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
-  static const int dbVersion = 9;
+  static const int dbVersion = 10;
 
   Database? _db;
 
@@ -194,6 +194,7 @@ class DatabaseHelper {
         is_deleted INTEGER NOT NULL DEFAULT 0,
         is_draft INTEGER NOT NULL DEFAULT 0,
         finance_pay INTEGER NOT NULL DEFAULT 0,
+        mileage_km INTEGER,
         backup_uid TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id),
@@ -432,6 +433,12 @@ class DatabaseHelper {
           await db.execute(sql);
         } catch (_) {}
       }
+    }
+    if (oldVersion < 10) {
+      // نسخه ۱۰: کیلومتر مراجعه‌ی خودرو روی فاکتور. فاکتورهای قبلی NULL می‌مانند.
+      try {
+        await db.execute('ALTER TABLE invoices ADD COLUMN mileage_km INTEGER');
+      } catch (_) {}
     }
     if (oldVersion < 9) {
       // نسخه ۹: جدول هزینه‌های خدماتی. جدول کاملاً جدید است و داده‌ی قبلی لمس نمی‌شود.
