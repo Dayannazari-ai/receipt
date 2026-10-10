@@ -59,6 +59,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   final _nameCtrl = TextEditingController();
   final _mobileCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  final _kmCtrl = TextEditingController();
 
   late InvoiceType _type;
   late PaymentType _paymentType;
@@ -88,6 +89,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     _checkDueDate = inv.checkDueDate != null ? DateTime.tryParse(inv.checkDueDate!) : null;
     _issueDateTime = DateTime.tryParse(inv.issueDate) ?? DateTime.now();
     _notesCtrl.text = inv.notes ?? '';
+    _kmCtrl.text = inv.mileageKm == null ? '' : '${inv.mileageKm}';
 
     _lines = widget.items
         .map((it) => InvoiceCartLine(
@@ -161,6 +163,11 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   double get _itemsTotal => _lines.fold(0.0, (s, l) => s + l.total);
   double get _sideCostsTotal => _sideCosts.fold(0.0, (s, c) => s + c.amount);
   double get _finalAmount => _itemsTotal + _sideCostsTotal;
+
+  int? _parseKm() {
+    final t = ThousandsInputFormatter.unformat(_kmCtrl.text.trim());
+    return int.tryParse(t);
+  }
 
   void _clearVehicle() {
     _selectedVehicle = null;
@@ -431,6 +438,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
           : null;
 
       await _invoiceService.updateDraftInvoice(
+        mileageKm: _parseKm(),
         financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         invoiceId: widget.invoice.id!,
         type: _type,
@@ -656,6 +664,13 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             onChanged: (v) => setState(() => _financePay = v ?? false),
             title: const Text('پرداخت از حساب فروش کالا'),
           ),
+        TextField(
+          controller: _kmCtrl,
+          decoration: const InputDecoration(labelText: 'کیلومتر مراجعه خودرو', suffixText: 'کیلومتر'),
+          keyboardType: TextInputType.number,
+          inputFormatters: [ThousandsInputFormatter()],
+        ),
+        const SizedBox(height: 12),
         TextField(controller: _notesCtrl, decoration: const InputDecoration(labelText: 'توضیحات'), maxLines: 2),
         const SizedBox(height: 24),
         ElevatedButton(
