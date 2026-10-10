@@ -321,6 +321,8 @@ class PdfService {
                 _headerInfoLine(
                     l, c, 'شماره فاکتور', PersianDateUtil.toPersianDigits(invoice.invoiceNumber)),
                 _headerInfoLine(l, c, 'نوع فاکتور', invoice.type.label),
+                if (invoice.mileageKm != null)
+                  _headerInfoLine(l, c, 'کیلومتر مراجعه', CurrencyFormatter.formatPlain(invoice.mileageKm!)),
               ]),
               if (_iconsRowImage != null) ...[
                 pw.SizedBox(width: l.headerInfoToIconsRowSpacing),
