@@ -165,6 +165,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               if (_customer != null) _row('مشتری', _customer!.name),
               if (_customer != null) _row('موبایل', PersianDateUtil.toPersianDigits(_customer!.mobile)),
               if (_vehicle != null) _row('خودرو', _vehicleLabel),
+              if (inv.mileageKm != null) _row('کیلومتر مراجعه خودرو', CurrencyFormatter.formatPlain(inv.mileageKm!)),
               _row('تاریخ صدور', PersianDateUtil.formatDate(inv.issueDate)),
               _row('نوع پرداخت', inv.paymentType.label),
               if ((inv.paymentAccountInfo ?? '').isNotEmpty) _row('حساب مقصد', inv.paymentAccountInfo!),
