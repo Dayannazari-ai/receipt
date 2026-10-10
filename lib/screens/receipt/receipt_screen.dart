@@ -44,6 +44,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   final _nameCtrl = TextEditingController();
   final _mobileCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  final _kmCtrl = TextEditingController();
 
   InvoiceType _type = InvoiceType.electrical;
   PaymentType _paymentType = PaymentType.onlinePayment;
@@ -417,6 +418,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   }
 
   void _resetFormAfterSave() {
+    _kmCtrl.clear();
     _lines.clear();
     _sideCosts.clear();
     _nameCtrl.clear();
@@ -441,6 +443,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           : null;
 
       final invoiceId = await _invoiceService.issueInvoice(
+        mileageKm: _parseKm(),
         financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         type: _type,
         customerId: customerId,
@@ -480,6 +483,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           : null;
 
       await _invoiceService.saveDraftInvoice(
+        mileageKm: _parseKm(),
         financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         type: _type,
         customerId: customerId,
@@ -506,7 +510,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     }
   }
 
+  int? _parseKm() {
+    final t = ThousandsInputFormatter.unformat(_kmCtrl.text.trim());
+    return int.tryParse(t);
+  }
+
   void _clearDraft() {
+    _kmCtrl.clear();
     setState(() {
       _lines.clear();
       _sideCosts.clear();
@@ -744,6 +754,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             onChanged: (v) => setState(() => _financePay = v ?? false),
             title: const Text('پرداخت از حساب فروش کالا'),
           ),
+        TextField(
+          controller: _kmCtrl,
+          decoration: const InputDecoration(labelText: 'کیلومتر مراجعه خودرو', suffixText: 'کیلومتر'),
+          keyboardType: TextInputType.number,
+          inputFormatters: [ThousandsInputFormatter()],
+        ),
+        const SizedBox(height: 12),
         TextField(controller: _notesCtrl, decoration: const InputDecoration(labelText: 'توضیحات'), maxLines: 2),
         const SizedBox(height: 24),
         ElevatedButton(
