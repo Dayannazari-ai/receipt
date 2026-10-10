@@ -173,7 +173,7 @@ class PdfService {
             padding: pw.EdgeInsets.fromLTRB(l.pageMarginLeft, l.pageMarginTop, l.pageMarginRight, 0),
             child: customer != null
                 ? pw.Column(children: [
-                    _customerInfo(l, c, customer),
+                    _customerInfo(l, c, customer, invoice.mileageKm),
                     pw.SizedBox(height: l.spacingAfterCustomerBox),
                   ])
                 : pw.SizedBox(),
@@ -321,8 +321,6 @@ class PdfService {
                 _headerInfoLine(
                     l, c, 'شماره فاکتور', PersianDateUtil.toPersianDigits(invoice.invoiceNumber)),
                 _headerInfoLine(l, c, 'نوع فاکتور', invoice.type.label),
-                if (invoice.mileageKm != null)
-                  _headerInfoLine(l, c, 'کیلومتر مراجعه', CurrencyFormatter.formatPlain(invoice.mileageKm!)),
               ]),
               if (_iconsRowImage != null) ...[
                 pw.SizedBox(width: l.headerInfoToIconsRowSpacing),
@@ -364,7 +362,7 @@ class PdfService {
     );
   }
 
-  static pw.Widget _customerInfo(InvoiceLayoutSettings l, _Palette c, Customer cust) {
+  static pw.Widget _customerInfo(InvoiceLayoutSettings l, _Palette c, Customer cust, int? mileageKm) {
     return pw.Container(
       height: l.customerBoxHeight > 0 ? l.customerBoxHeight : null,
       alignment: l.customerBoxHeight > 0 ? pw.Alignment.center : null,
@@ -378,6 +376,9 @@ class PdfService {
         pw.Text('مشتری: ${cust.name}', style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
         pw.Text('موبایل: ${PersianDateUtil.toPersianDigits(cust.mobile)}',
             style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
+        if (mileageKm != null)
+          pw.Text('کیلومتر مراجعه: ${CurrencyFormatter.formatPlain(mileageKm)}',
+              style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
       ]),
     );
   }
