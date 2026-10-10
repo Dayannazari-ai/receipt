@@ -72,6 +72,7 @@ class Invoice {
   final int isDeleted;
   final int isDraft; // ۱ = پیش‌فاکتور (هنوز فاکتور اصلی نشده)، ۰ = فاکتور اصلی
   final String? backupUid; // شناسه‌ی پایدار یکتا، مستقل از invoice_number، برای Backup/Restore
+  final int? mileageKm; // کیلومتر مراجعه‌ی خودرو (اختیاری)
   final String createdAt;
 
   Invoice({
@@ -91,6 +92,7 @@ class Invoice {
     this.isDeleted = 0,
     this.isDraft = 0,
     this.backupUid,
+    this.mileageKm,
     String? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
 
@@ -114,6 +116,7 @@ class Invoice {
         'is_deleted': isDeleted,
         'is_draft': isDraft,
         'backup_uid': backupUid,
+        'mileage_km': mileageKm,
         'created_at': createdAt,
       };
 
@@ -134,6 +137,7 @@ class Invoice {
         isDeleted: map['is_deleted'] as int? ?? 0,
         isDraft: map['is_draft'] as int? ?? 0,
         backupUid: map['backup_uid'] as String?,
+        mileageKm: (map['mileage_km'] as num?)?.toInt(),
         createdAt: map['created_at'] as String?,
       );
 }
