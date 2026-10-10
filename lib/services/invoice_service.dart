@@ -36,6 +36,7 @@ class InvoiceService {
 
   /// صدور فاکتور اصلی. [vehicleId] اختیاری است؛ فاکتور بدون خودرو هم مجاز است.
   /// [financePay]: تیک «پرداخت از حساب فروش کالا» (فقط برای فاکتور خرید کالا).
+  /// [mileageKm]: کیلومتر مراجعه‌ی خودرو (اختیاری).
   Future<int> issueInvoice({
     required InvoiceType type,
     int? customerId,
@@ -48,6 +49,7 @@ class InvoiceService {
     DateTime? issueDateTime,
     String? checkDueDate,
     bool financePay = false,
+    int? mileageKm,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -71,6 +73,7 @@ class InvoiceService {
       checkDueDate: checkDueDate,
       notes: notes,
       isDraft: 0,
+      mileageKm: mileageKm,
     );
 
     final items = lines
@@ -112,6 +115,7 @@ class InvoiceService {
     DateTime? issueDateTime,
     String? checkDueDate,
     bool financePay = false,
+    int? mileageKm,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -135,6 +139,7 @@ class InvoiceService {
       checkDueDate: checkDueDate,
       notes: notes,
       isDraft: 1,
+      mileageKm: mileageKm,
     );
 
     final items = lines
@@ -180,6 +185,7 @@ class InvoiceService {
     required DateTime issueDateTime,
     String? checkDueDate,
     bool? financePay,
+    int? mileageKm,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -205,6 +211,7 @@ class InvoiceService {
       checkDueDate: checkDueDate,
       notes: notes,
       isDraft: 1,
+      mileageKm: mileageKm,
     );
 
     final items = lines
