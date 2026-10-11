@@ -132,6 +132,7 @@ class PdfService {
     Customer? customer,
     required AppSettings settings,
     InvoiceLayoutSettings? layout,
+    String vehicleLabel = '',
   }) async {
     final l = layout ?? await InvoiceLayoutStorage.load();
     final c = _Palette(l);
@@ -173,7 +174,7 @@ class PdfService {
             padding: pw.EdgeInsets.fromLTRB(l.pageMarginLeft, l.pageMarginTop, l.pageMarginRight, 0),
             child: customer != null
                 ? pw.Column(children: [
-                    _customerInfo(l, c, customer, invoice.mileageKm),
+                    _customerInfoRow(l, c, customer, vehicleLabel, invoice.mileageKm),
                     pw.SizedBox(height: l.spacingAfterCustomerBox),
                   ])
                 : pw.SizedBox(),
@@ -359,6 +360,41 @@ class PdfService {
             child: pw.Container(
                 width: l.bottomAccentFallbackOrangeWidth, height: l.bottomAccentHeight, color: c.orange)),
       ]),
+    );
+  }
+
+  /// ردیف اطلاعات مشتری: جدول تک‌ردیفه‌ی بدون سرتیتر با حداکثر ۴ خانه‌ی جدا
+  /// (از راست: مشتری، موبایل، خودرو، کیلومتر). خانه‌های خالی نمایش داده نمی‌شوند.
+  static pw.Widget _customerInfoRow(
+      InvoiceLayoutSettings l, _Palette c, Customer cust, String vehicleLabel, int? mileageKm) {
+    // ترتیب لیست از چپ به راست فیزیکی است (جدول، RTL را خودکار نمی‌چرخاند).
+    final cells = <MapEntry<String, double>>[
+      if (mileageKm != null) MapEntry('کیلومتر مراجعه: ${CurrencyFormatter.formatPlain(mileageKm)}', 1.0),
+      if (vehicleLabel.trim().isNotEmpty) MapEntry('خودرو: ${vehicleLabel.trim()}', 1.3),
+      MapEntry('موبایل: ${PersianDateUtil.toPersianDigits(cust.mobile)}', 1.1),
+      MapEntry('مشتری: ${cust.name}', 1.3),
+    ];
+    pw.Widget cell(String text) => pw.Container(
+          height: l.customerBoxHeight > 0 ? l.customerBoxHeight : null,
+          alignment: pw.Alignment.center,
+          padding: pw.EdgeInsets.symmetric(
+              horizontal: l.tableCellHorizontalPadding, vertical: l.customerBoxPadding),
+          child: pw.Text(text,
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
+        );
+    return pw.Table(
+      border: pw.TableBorder.all(color: c.border, width: l.customerBoxBorderWidth),
+      defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
+      columnWidths: {
+        for (var i = 0; i < cells.length; i++) i: pw.FlexColumnWidth(cells[i].value),
+      },
+      children: [
+        pw.TableRow(
+          decoration: pw.BoxDecoration(color: c.lightGray),
+          children: cells.map((e) => cell(e.key)).toList(),
+        ),
+      ],
     );
   }
 
