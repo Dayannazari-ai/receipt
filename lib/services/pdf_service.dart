@@ -370,7 +370,7 @@ class PdfService {
     // ترتیب لیست از چپ به راست فیزیکی است (جدول، RTL را خودکار نمی‌چرخاند).
     final cells = <MapEntry<String, double>>[
       if (mileageKm != null) MapEntry('کیلومتر مراجعه: ${CurrencyFormatter.formatPlain(mileageKm)}', 1.0),
-      if (vehicleLabel.trim().isNotEmpty) MapEntry('خودرو: ${vehicleLabel.trim()}', 1.3),
+      if (vehicleLabel.trim().isNotEmpty) MapEntry('خودرو: ${vehicleLabel.trim().replaceAll(' - ', ' ')}', 1.3),
       MapEntry('موبایل: ${PersianDateUtil.toPersianDigits(cust.mobile)}', 1.1),
       MapEntry('مشتری: ${cust.name}', 1.3),
     ];
