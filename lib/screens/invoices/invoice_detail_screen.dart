@@ -238,7 +238,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   body: PdfPreview(
                     build: (format) async {
                       final file = await PdfService.generateInvoicePdf(
-                          invoice: inv, items: _items, sideCosts: _sideCosts, customer: _customer, settings: _settings);
+                          invoice: inv, items: _items, sideCosts: _sideCosts, customer: _customer, settings: _settings, vehicleLabel: _vehicleLabel);
                       return file.readAsBytes();
                     },
                     allowPrinting: true,
