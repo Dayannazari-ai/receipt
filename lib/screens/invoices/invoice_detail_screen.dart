@@ -16,6 +16,7 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../../utils/thousands_input_formatter.dart';
 import 'edit_draft_invoice_screen.dart';
+import '../../repositories/invoice_void_repository.dart';
 
 class InvoiceDetailScreen extends StatefulWidget {
   final int invoiceId;
@@ -42,6 +43,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   AppSettings _settings = AppSettings();
   bool _loading = true;
   bool _converting = false;
+  bool _voiding = false;
+  final _voidRepo = InvoiceVoidRepository();
 
   @override
   void initState() {
@@ -141,6 +144,34 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       _showMsg('خطا در ذخیره‌ی هزینه‌های جانبی: ${e is StateError ? e.message : e}');
     }
   }
+    Future<void> _confirmVoid() async {
+    final inv = _invoice!;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ابطال فاکتور'),
+        content: Text(
+            'فاکتور ${PersianDateUtil.toPersianDigits(inv.invoiceNumber)} (${inv.type.label}) به مبلغ ${CurrencyFormatter.format(inv.finalAmount, _settings.currency)} باطل شود؟\n\n'
+            'موجودی کالا برگردانده، تراکنش‌های مالی با اصلاحیه خنثی و چک آن حذف می‌شود. شماره‌ی فاکتور آزاد می‌شود. این کار قابل بازگشت نیست.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ابطال فاکتور', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _voiding = true);
+    try {
+      final number = await _voidRepo.voidInvoice(inv.id!);
+      if (!mounted) return;
+      _showMsg('فاکتور ${PersianDateUtil.toPersianDigits(number)} باطل شد');
+      Navigator.of(context).pop();
+    } catch (e) {
+      _showMsg('خطا در ابطال: ${e is StateError ? e.message : e}');
+    } finally {
+      if (mounted) setState(() => _voiding = false);
+    }
+  }
 
   Future<void> _confirmConvertToInvoice() async {
     final confirm = await showDialog<bool>(
@@ -179,7 +210,17 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final isDraft = inv.isDraft == 1;
 
     return Scaffold(
-      appBar: AppBar(title: Text('${inv.type.label} - ${PersianDateUtil.toPersianDigits(inv.invoiceNumber)}')),
+            appBar: AppBar(
+        title: Text('${inv.type.label} - ${PersianDateUtil.toPersianDigits(inv.invoiceNumber)}'),
+        actions: [
+          if (!isDraft)
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              tooltip: 'ابطال فاکتور',
+              onPressed: _voiding ? null : _confirmVoid,
+            ),
+        ],
+      ),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         if (isDraft)
           Container(
