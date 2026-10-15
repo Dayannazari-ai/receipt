@@ -5,6 +5,7 @@ import '../../models/customer.dart';
 import '../../models/vehicle.dart';
 import '../../models/app_settings.dart';
 import '../../repositories/invoice_repository.dart';
+import '../../repositories/invoice_side_cost_editor.dart';
 import '../../repositories/customer_repository.dart';
 import '../../repositories/vehicle_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
@@ -13,6 +14,7 @@ import '../../services/pdf_service.dart';
 import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
+import '../../utils/thousands_input_formatter.dart';
 import 'edit_draft_invoice_screen.dart';
 
 class InvoiceDetailScreen extends StatefulWidget {
@@ -29,6 +31,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   final _vehicleRepo = VehicleRepository();
   final _settingsRepo = SettingsRepository();
   final _invoiceService = InvoiceService();
+  final _sideCostEditor = InvoiceSideCostEditor();
 
   Invoice? _invoice;
   List<InvoiceItem> _items = [];
@@ -103,6 +106,40 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       ),
     );
     if (result == true) _load();
+  }
+
+  /// ویرایش هزینه‌های جانبی (افزودن، ویرایش عنوان/مبلغ، حذف) حتی بعد از صدور.
+  /// فقط جدول side_costs و جمع‌های همین فاکتور تغییر می‌کند؛ هیچ تراکنش مالی
+  /// ساخته نمی‌شود. اگر فاکتور کالا در دفتر مالی ثبت شده باشد، ویرایش مجاز نیست.
+  Future<void> _editSideCosts() async {
+    final inv = _invoice!;
+    final reason = await _sideCostEditor.blockReason(inv.id!);
+    if (reason != null) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('ویرایش هزینه‌های جانبی ممکن نیست'),
+          content: Text(reason),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('باشه'))],
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final result = await showModalBottomSheet<List<SideCostLine>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _SideCostsEditorSheet(initial: _sideCosts, currency: _settings.currency),
+    );
+    if (result == null) return;
+    try {
+      await _sideCostEditor.replaceSideCosts(invoiceId: inv.id!, lines: result);
+      if (mounted) _showMsg('هزینه‌های جانبی ذخیره شد');
+      await _load();
+    } catch (e) {
+      _showMsg('خطا در ذخیره‌ی هزینه‌های جانبی: ${e is StateError ? e.message : e}');
+    }
   }
 
   Future<void> _confirmConvertToInvoice() async {
@@ -185,15 +222,26 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 trailing: Text(CurrencyFormatter.format(it.total, _settings.currency)),
               ),
             )),
-        if (_sideCosts.isNotEmpty) ...[
-          const SizedBox(height: 12),
+        const SizedBox(height: 12),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           const Text('هزینه‌های جانبی', style: TextStyle(fontWeight: FontWeight.bold)),
+          TextButton.icon(
+            icon: Icon(_sideCosts.isEmpty ? Icons.add : Icons.edit_outlined, size: 18),
+            label: Text(_sideCosts.isEmpty ? 'افزودن هزینه' : 'ویرایش'),
+            onPressed: _editSideCosts,
+          ),
+        ]),
+        if (_sideCosts.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: Text('بدون هزینه‌ی جانبی', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          )
+        else
           ..._sideCosts.map((c) => ListTile(
                 dense: true,
                 title: Text(c.title),
                 trailing: Text(CurrencyFormatter.format(c.amount, _settings.currency)),
               )),
-        ],
         const SizedBox(height: 16),
         Card(
           color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
@@ -270,6 +318,152 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         Text(label, style: style),
         Text(CurrencyFormatter.format(amount, _settings.currency), style: style),
       ]),
+    );
+  }
+}
+
+// ---------------- ویرایشگر هزینه‌های جانبی ----------------
+
+class _EditableCostRow {
+  final TextEditingController title;
+  final TextEditingController amount;
+  _EditableCostRow(String t, String a)
+      : title = TextEditingController(text: t),
+        amount = TextEditingController(text: a);
+  void dispose() {
+    title.dispose();
+    amount.dispose();
+  }
+}
+
+class _SideCostsEditorSheet extends StatefulWidget {
+  final List<SideCost> initial;
+  final Currency currency;
+  const _SideCostsEditorSheet({required this.initial, required this.currency});
+
+  @override
+  State<_SideCostsEditorSheet> createState() => _SideCostsEditorSheetState();
+}
+
+class _SideCostsEditorSheetState extends State<_SideCostsEditorSheet> {
+  late final List<_EditableCostRow> _rows;
+  final List<_EditableCostRow> _removedRows = []; // کنترلرهای ردیف‌های حذف‌شده؛ در dispose بسته می‌شوند
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _rows = widget.initial.map((c) => _EditableCostRow(c.title, c.amount.toStringAsFixed(0))).toList();
+  }
+
+  @override
+  void dispose() {
+    for (final r in _rows) {
+      r.dispose();
+    }
+    for (final r in _removedRows) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  double _parse(String text) => double.tryParse(ThousandsInputFormatter.unformat(text.trim())) ?? 0.0;
+
+  double get _total => _rows.fold<double>(0.0, (s, r) => s + _parse(r.amount.text));
+
+  void _addRow() => setState(() => _rows.add(_EditableCostRow('', '')));
+
+  void _removeRow(int i) {
+    setState(() => _removedRows.add(_rows.removeAt(i)));
+  }
+
+  void _save() {
+    final out = <SideCostLine>[];
+    for (final r in _rows) {
+      final title = r.title.text.trim();
+      final amountText = r.amount.text.trim();
+      if (title.isEmpty && amountText.isEmpty) continue; // ردیف خالی نادیده گرفته می‌شود
+      if (title.isEmpty) {
+        setState(() => _error = 'عنوان همه‌ی هزینه‌ها را وارد کنید');
+        return;
+      }
+      final amount = double.tryParse(ThousandsInputFormatter.unformat(amountText));
+      if (amount == null || amount <= 0) {
+        setState(() => _error = 'مبلغ هر هزینه باید بیشتر از صفر باشد');
+        return;
+      }
+      out.add(SideCostLine(title: title, amount: amount));
+    }
+    Navigator.pop(context, out);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      expand: false,
+      builder: (context, scrollController) => Padding(
+        padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+        child: Column(children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('ویرایش هزینه‌های جانبی', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            TextButton.icon(icon: const Icon(Icons.add, size: 18), label: const Text('افزودن هزینه'), onPressed: _addRow),
+          ]),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _rows.isEmpty
+                ? const Center(child: Text('هزینه‌ای وجود ندارد'))
+                : ListView.builder(
+                    controller: scrollController,
+                    itemCount: _rows.length,
+                    itemBuilder: (context, i) {
+                      final r = _rows[i];
+                      return Padding(
+                        key: ObjectKey(r),
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextField(controller: r.title, decoration: const InputDecoration(labelText: 'عنوان هزینه')),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: r.amount,
+                              decoration: InputDecoration(labelText: 'مبلغ', suffixText: widget.currency.label),
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [ThousandsInputFormatter()],
+                              onChanged: (_) => setState(() => _error = null),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            tooltip: 'حذف',
+                            onPressed: () => _removeRow(i),
+                          ),
+                        ]),
+                      );
+                    },
+                  ),
+          ),
+          const Divider(),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('جمع هزینه‌های جانبی', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(CurrencyFormatter.format(_total, widget.currency), style: const TextStyle(fontWeight: FontWeight.bold)),
+          ]),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+          ],
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('انصراف'))),
+            const SizedBox(width: 10),
+            Expanded(child: ElevatedButton(onPressed: _save, child: const Text('ذخیره'))),
+          ]),
+        ]),
+      ),
     );
   }
 }
