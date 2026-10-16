@@ -26,6 +26,7 @@ import '../products/barcode_scanner_screen.dart';
 import '../vehicles/vehicle_picker_sheet.dart';
 import '../voice_search_sheet.dart';
 import '../products/product_form_screen.dart';
+import 'quick_add_customer_dialog.dart';
 
 /// صفحه‌ی اصلی «رسید»: صدور فاکتور با انتخاب نوع، مشتری، اقلام، هزینه جانبی و نوع پرداخت.
 class ReceiptScreen extends StatefulWidget {
@@ -67,6 +68,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   bool _hasFinanceAccount = false;
   bool _financePay = true;
   DateTime _issueDateTime = DateTime.now();
+
+  // فهرست بازشونده‌ی انتخاب مشتری (null = در حال بارگذاری).
+  bool _customerListOpen = false;
+  List<Customer>? _customerResults;
+  int _customerSearchSeq = 0;
 
   /// شماره‌ای که این فاکتور با آن صادر می‌شود (دستی یا خودکار).
   String get _activeNumber => _manualNumber ?? _nextInvoiceNumber;
@@ -151,21 +157,103 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     _selectedVehicleLabel = '';
   }
 
-  Future<void> _pickCustomer() async {
-    final selected = await showModalBottomSheet<Customer>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const _CustomerPickerSheet(),
-    );
-    if (selected != null) {
-      setState(() {
-        // خودروی مشتری قبلی نباید به مشتری جدید بچسبد.
-        if (_selectedCustomerId != selected.id) _clearVehicle();
-        _selectedCustomerId = selected.id;
-        _nameCtrl.text = selected.name;
-        _mobileCtrl.text = selected.mobile;
-      });
+  // ---------------- انتخاب مشتری (کادر بازشونده با جست‌وجوی لحظه‌ای) ----------------
+
+  /// جست‌وجوی لحظه‌ای مشتریان بر اساس نام یا موبایل. شماره‌ی درخواست جلوی
+  /// نشستن نتیجه‌ی قدیمی روی نتیجه‌ی جدید را می‌گیرد. چیزی در دیتابیس
+  /// نوشته نمی‌شود.
+  Future<void> _searchCustomers(String q) async {
+    final seq = ++_customerSearchSeq;
+    final query = q.trim();
+    final list = query.isEmpty ? await _customerRepo.getAll() : await _customerRepo.search(query);
+    if (!mounted || seq != _customerSearchSeq) return;
+    setState(() => _customerResults = list);
+  }
+
+  void _openCustomerList() {
+    if (_customerListOpen) return;
+    setState(() {
+      _customerListOpen = true;
+      _customerResults = null;
+    });
+    // اگر مشتری انتخاب شده، برای تغییر مشتری کل فهرست نشان داده می‌شود.
+    _searchCustomers(_selectedCustomerId != null ? '' : _nameCtrl.text);
+  }
+
+  void _toggleCustomerList() {
+    if (_customerListOpen) {
+      setState(() => _customerListOpen = false);
+    } else {
+      _openCustomerList();
     }
+  }
+
+  void _selectCustomer(Customer c) {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      // خودروی مشتری قبلی نباید به مشتری جدید بچسبد.
+      if (_selectedCustomerId != c.id) _clearVehicle();
+      _selectedCustomerId = c.id;
+      _nameCtrl.text = c.name;
+      _mobileCtrl.text = c.mobile;
+      _customerListOpen = false;
+    });
+  }
+
+  /// افزودن مشتری جدید از داخل همین صفحه (دیالوگ). بعد از ثبت، مشتری برای
+  /// همین فاکتور انتخاب می‌شود. اگر موبایل تکراری باشد مشتری قبلی انتخاب می‌شود.
+  Future<void> _addNewCustomer() async {
+    final result = await showQuickAddCustomerDialog(
+      context,
+      initialName: _nameCtrl.text.trim(),
+      initialMobile: _mobileCtrl.text.trim(),
+    );
+    if (result == null || !mounted) return;
+    _selectCustomer(result.customer);
+    if (result.alreadyExisted) {
+      _showMsg('مشتری با این شماره از قبل ثبت شده بود؛ همان مشتری انتخاب شد');
+    }
+  }
+
+  Widget _customerResultsPanel() {
+    final results = _customerResults;
+    if (results == null) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    if (results.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(children: [
+          const Text('مشتری یافت نشد', style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 4),
+          TextButton.icon(
+            icon: const Icon(Icons.person_add_alt_1, size: 18),
+            label: const Text('افزودن مشتری جدید'),
+            onPressed: _addNewCustomer,
+          ),
+        ]),
+      );
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 260),
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: results.length,
+        itemBuilder: (context, i) {
+          final c = results[i];
+          return ListTile(
+            dense: true,
+            leading: const CircleAvatar(radius: 16, child: Icon(Icons.person, size: 18)),
+            title: Text(c.name),
+            subtitle: Text(PersianDateUtil.toPersianDigits(c.mobile)),
+            onTap: () => _selectCustomer(c),
+          );
+        },
+      ),
+    );
   }
 
   /// انتخاب خودرو فقط وقتی ممکن است که مشتری از قبل ذخیره‌شده (با شناسه‌ی
@@ -518,6 +606,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     _issueDateTime = DateTime.now();
     _checkDueDate = null;
     _manualNumber = null;
+    _customerListOpen = false;
   }
 
   /// صدور فاکتور اصلی. منطق دقیقاً مثل قبل است؛ فقط vehicleId هم منتقل می‌شود.
@@ -621,6 +710,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       _issueDateTime = DateTime.now();
       _checkDueDate = null;
       _manualNumber = null;
+      _customerListOpen = false;
     });
   }
 
@@ -687,26 +777,47 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           },
         ),
         const SizedBox(height: 16),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('مشتری', style: TextStyle(fontWeight: FontWeight.w600)),
-          TextButton.icon(icon: const Icon(Icons.person_search, size: 18), label: const Text('انتخاب از لیست'), onPressed: _pickCustomer),
-        ]),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: Text('مشتری', style: TextStyle(fontWeight: FontWeight.w600)),
+        ),
         Container(
           decoration: BoxDecoration(color: const Color(0xFFEFEFF1), borderRadius: BorderRadius.circular(16)),
           child: Column(children: [
             TextField(
               controller: _nameCtrl,
-              decoration: const InputDecoration(labelText: 'نام مشتری', border: InputBorder.none, filled: false),
-              onChanged: (_) => setState(() {
-                _selectedCustomerId = null;
-                _clearVehicle();
-              }),
+              decoration: InputDecoration(
+                labelText: 'نام مشتری',
+                border: InputBorder.none,
+                filled: false,
+                suffixIcon: IconButton(
+                  tooltip: 'فهرست مشتریان',
+                  icon: Icon(_customerListOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+                  onPressed: _toggleCustomerList,
+                ),
+              ),
+              onTap: _openCustomerList,
+              onChanged: (v) {
+                setState(() {
+                  _selectedCustomerId = null;
+                  _clearVehicle();
+                  _customerListOpen = true;
+                });
+                _searchCustomers(v);
+              },
             ),
+            if (_customerListOpen) ...[
+              const Divider(height: 1),
+              _customerResultsPanel(),
+            ],
             const Divider(height: 1),
             TextField(
               controller: _mobileCtrl,
               decoration: const InputDecoration(labelText: 'شماره تماس', border: InputBorder.none, filled: false),
               keyboardType: TextInputType.phone,
+              onTap: () {
+                if (_customerListOpen) setState(() => _customerListOpen = false);
+              },
               onChanged: (_) => setState(() {
                 _selectedCustomerId = null;
                 _clearVehicle();
@@ -920,69 +1031,6 @@ class _InvoiceNumberPickerSheet extends StatelessWidget {
               ),
               ...freedNumbers.map((n) => tile(n, 'آزادشده')),
             ]),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-// ---------------- Customer picker ----------------
-
-class _CustomerPickerSheet extends StatefulWidget {
-  const _CustomerPickerSheet();
-  @override
-  State<_CustomerPickerSheet> createState() => _CustomerPickerSheetState();
-}
-
-class _CustomerPickerSheetState extends State<_CustomerPickerSheet> {
-  final _repo = CustomerRepository();
-  final _searchCtrl = TextEditingController();
-  List<Customer> _results = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _search('');
-  }
-
-  Future<void> _search(String q) async {
-    final list = q.isEmpty ? await _repo.getAll() : await _repo.search(q);
-    if (mounted) setState(() => _results = list);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.8,
-      expand: false,
-      builder: (context, scrollController) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          const Text('انتخاب مشتری', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _searchCtrl,
-            decoration: const InputDecoration(hintText: 'جستجوی مشتری...', prefixIcon: Icon(Icons.search)),
-            onChanged: _search,
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: _results.isEmpty
-                ? const Center(child: Text('مشتری‌ای یافت نشد'))
-                : ListView.builder(
-                    controller: scrollController,
-                    itemCount: _results.length,
-                    itemBuilder: (context, i) {
-                      final c = _results[i];
-                      return ListTile(
-                        leading: const CircleAvatar(child: Icon(Icons.person)),
-                        title: Text(c.name),
-                        subtitle: Text(c.mobile),
-                        onTap: () => Navigator.of(context).pop(c),
-                      );
-                    },
-                  ),
           ),
         ]),
       ),
