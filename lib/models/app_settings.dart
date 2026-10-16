@@ -7,7 +7,13 @@ extension CurrencyX on Currency {
 }
 
 class AppSettings {
+  /// مقدار پیش‌فرض عبارت زیر نام فروشگاه در سربرگ فاکتور. فقط وقتی استفاده
+  /// می‌شود که کاربر هنوز این تنظیم را ذخیره نکرده باشد؛ اگر کاربر آن را
+  /// خالی ذخیره کند، عبارت در سربرگ نمایش داده نمی‌شود.
+  static const String defaultHeaderSubtitle = 'تعمیرگاه تخصصی خودرو';
+
   final String shopName;
+  final String headerSubtitle; // عبارت زیر نام فروشگاه در سربرگ فاکتور (قابل ویرایش)
   final String contactNumber;
   final String address;
   final int invoiceStartNumber;
@@ -19,6 +25,7 @@ class AppSettings {
 
   AppSettings({
     this.shopName = 'تعمیرگاه من',
+    this.headerSubtitle = defaultHeaderSubtitle,
     this.contactNumber = '',
     this.address = '',
     this.invoiceStartNumber = 1001,
@@ -31,6 +38,7 @@ class AppSettings {
 
   Map<String, String> toKeyValueMap() => {
         'shop_name': shopName,
+        'header_subtitle': headerSubtitle,
         'contact_number': contactNumber,
         'address': address,
         'invoice_start_number': invoiceStartNumber.toString(),
@@ -43,6 +51,8 @@ class AppSettings {
 
   factory AppSettings.fromKeyValueMap(Map<String, String> map) => AppSettings(
         shopName: map['shop_name'] ?? 'تعمیرگاه من',
+        // اگر کلید هنوز ذخیره نشده (نسخه‌های قبلی)، مقدار پیش‌فرض؛ اگر خالی ذخیره شده، خالی.
+        headerSubtitle: map['header_subtitle'] ?? defaultHeaderSubtitle,
         contactNumber: map['contact_number'] ?? '',
         address: map['address'] ?? '',
         invoiceStartNumber: int.tryParse(map['invoice_start_number'] ?? '') ?? 1001,
@@ -55,6 +65,7 @@ class AppSettings {
 
   AppSettings copyWith({
     String? shopName,
+    String? headerSubtitle,
     String? contactNumber,
     String? address,
     int? invoiceStartNumber,
@@ -66,6 +77,7 @@ class AppSettings {
   }) =>
       AppSettings(
         shopName: shopName ?? this.shopName,
+        headerSubtitle: headerSubtitle ?? this.headerSubtitle,
         contactNumber: contactNumber ?? this.contactNumber,
         address: address ?? this.address,
         invoiceStartNumber: invoiceStartNumber ?? this.invoiceStartNumber,
