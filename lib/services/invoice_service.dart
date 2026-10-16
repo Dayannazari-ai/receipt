@@ -34,9 +34,16 @@ class InvoiceService {
 
   Future<String> nextInvoiceNumber(InvoiceType type) => _invoiceRepo.getNextInvoiceNumber(type);
 
+  /// شماره‌های آزادشده‌ی (باطل‌شده) این نوع فاکتور که قابل انتخاب دستی‌اند.
+  Future<List<String>> freedNumbers(InvoiceType type) => _invoiceRepo.getFreedNumbers(type);
+
   /// صدور فاکتور اصلی. [vehicleId] اختیاری است؛ فاکتور بدون خودرو هم مجاز است.
   /// [financePay]: تیک «پرداخت از حساب فروش کالا» (فقط برای فاکتور خرید کالا).
   /// [mileageKm]: کیلومتر مراجعه‌ی خودرو (اختیاری).
+  /// [manualInvoiceNumber]: شماره‌ی انتخاب‌شده‌ی دستی (فقط شماره‌ی بعدیِ
+  /// خودکار یا یکی از شماره‌های آزادشده‌ی همین نوع مجاز است). اگر خالی باشد،
+  /// شماره‌ی بعدی خودکار گرفته می‌شود. تکراری نبودن شماره داخل تراکنش
+  /// createInvoice هم دوباره بررسی می‌شود.
   Future<int> issueInvoice({
     required InvoiceType type,
     int? customerId,
@@ -50,11 +57,25 @@ class InvoiceService {
     String? checkDueDate,
     bool financePay = false,
     int? mileageKm,
+    String? manualInvoiceNumber,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
     }
-    final invoiceNumber = await nextInvoiceNumber(type);
+    final String invoiceNumber;
+    final manual = manualInvoiceNumber?.trim() ?? '';
+    if (manual.isNotEmpty) {
+      final next = await nextInvoiceNumber(type);
+      if (manual != next) {
+        final freed = await _invoiceRepo.getFreedNumbers(type);
+        if (!freed.contains(manual)) {
+          throw StateError('این شماره‌ی فاکتور دیگر در دسترس نیست؛ شماره را دوباره انتخاب کنید');
+        }
+      }
+      invoiceNumber = manual;
+    } else {
+      invoiceNumber = await nextInvoiceNumber(type);
+    }
     final itemsTotal = lines.fold(0.0, (s, l) => s + l.total);
     final sideCostsTotal = sideCosts.fold(0.0, (s, c) => s + c.amount);
     final finalAmount = itemsTotal + sideCostsTotal;
