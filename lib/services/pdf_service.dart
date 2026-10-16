@@ -71,6 +71,17 @@ class PdfService {
   static pw.MemoryImage? _instagramIconImage;
   static bool _assetsLoaded = false;
 
+  // ---- ثابت‌های چیدمان بخش میانی سربرگ (فقط ظاهر؛ هیچ داده‌ای ثابت نیست) ----
+  static const double _headerSubtitleExtraFontSize = 1.5;
+  static const double _headerSubtitleDashWidth = 14;
+  static const double _headerSubtitleDashThickness = 1.2;
+  static const double _headerNameToSubtitleGap = 3;
+  static const double _headerSubtitleToContactGap = 6;
+  /// ضریب بزرگ‌کردن ستون آیکون‌های سمت چپ سربرگ (تاریخ/شماره/نوع) تا فاصله‌ی
+  /// آیکون‌ها با فاصله‌ی سه خط متن کنارشان هم‌تراز شود. تصویر با همین نسبت
+  /// بزرگ می‌شود و کج یا کشیده نمی‌شود.
+  static const double _headerIconsRowScale = 1.12;
+
   static Future<void> _loadFonts() async {
     if (_regularFont != null) return;
     try {
@@ -226,8 +237,13 @@ class PdfService {
       );
 
   /// سربرگ: نوار نارنجی بالا، و زیر آن یک ردیف سه‌بخشی (از راست به چپ):
-  /// ۱) لوگوی کارگاه  ۲) بخش میانی: تلفن، آدرس و ردیف اینستاگرام
-  /// ۳) تاریخ/شماره/نوع فاکتور کنار آیکون‌های تصویری.
+  /// ۱) لوگوی کارگاه و زیر آن آدرس فروشگاه با آیکون مکان‌یاب
+  /// ۲) بخش میانی: نام فروشگاه، عبارت «تعمیرگاه تخصصی خودرو» و ردیف تماس
+  ///    (اینستاگرام | تلفن، با خط عمودی بین آن‌ها)
+  /// ۳) تاریخ/شماره/نوع فاکتور کنار آیکون‌های تصویری (بدون تغییر).
+  ///
+  /// نام فروشگاه، عبارت زیر آن، تلفن، آدرس و اینستاگرام همگی از تنظیمات خوانده می‌شوند.
+  /// اگر عبارت زیر نام فروشگاه خالی باشد، آن ردیف (با دو خط نارنجی) نمایش داده نمی‌شود.
   static pw.Widget _header(InvoiceLayoutSettings l, _Palette c, AppSettings settings,
       Invoice invoice, pw.MemoryImage? logo, pw.MemoryImage? instagramIcon) {
     // تلفن و آدرس: مقدار واردشده در تنظیمات قالب؛ اگر خالی بود از تنظیمات برنامه.
@@ -240,6 +256,111 @@ class PdfService {
     final instagramUser = l.instagramUsername.trim();
     final showInstagram = l.instagramEnabled && instagramUser.isNotEmpty;
     final igIcon = instagramIcon;
+    final shopName = settings.shopName.trim();
+    final subtitle = settings.headerSubtitle.trim();
+
+    // ---- بخش میانی: ردیف تماس (آیکون سمت چپِ متن، مطابق طرح مرجع) ----
+    pw.Widget instagramPart() => pw.Row(mainAxisSize: pw.MainAxisSize.min, children: [
+          pw.Text(instagramUser,
+              textDirection: pw.TextDirection.ltr,
+              style: pw.TextStyle(fontSize: l.headerContactFontSize, color: c.darkGray)),
+          if (l.instagramIconVisible && igIcon != null) ...[
+            pw.SizedBox(width: l.headerIconToTextSpacing),
+            pw.Image(igIcon,
+                width: l.instagramIconSize, height: l.instagramIconSize, fit: pw.BoxFit.contain),
+          ],
+        ]);
+
+    pw.Widget phonePart() => pw.Row(mainAxisSize: pw.MainAxisSize.min, children: [
+          pw.Text(PersianDateUtil.toPersianDigits(phone),
+              style: pw.TextStyle(fontSize: l.headerContactFontSize, color: c.darkGray)),
+          if (_phoneIconImage != null) ...[
+            pw.SizedBox(width: l.headerIconToTextSpacing),
+            pw.Image(_phoneIconImage!, width: l.contactIconSize, height: l.contactIconSize),
+          ],
+        ]);
+
+    // ترتیب در سند RTL: اولین عنصر در راست‌ترین جا قرار می‌گیرد (اینستاگرام راست، تلفن چپ).
+    final contactParts = <pw.Widget>[
+      if (showInstagram) instagramPart(),
+      if (phone.isNotEmpty) phonePart(),
+    ];
+    final contactChildren = <pw.Widget>[];
+    for (var i = 0; i < contactParts.length; i++) {
+      if (i > 0) {
+        contactChildren.addAll([
+          pw.SizedBox(width: l.headerSectionGap),
+          pw.Container(width: l.headerDividerWidth, height: l.contactIconSize * 1.6, color: c.border),
+          pw.SizedBox(width: l.headerSectionGap),
+        ]);
+      }
+      contactChildren.add(contactParts[i]);
+    }
+
+    pw.Widget subtitleDash() => pw.Container(
+        width: _headerSubtitleDashWidth, height: _headerSubtitleDashThickness, color: c.orange);
+
+    // ---- بخش سمت راست: لوگو + آدرس فروشگاه زیر آن ----
+    final rightSection = pw.Expanded(
+      flex: 5,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        mainAxisAlignment: pw.MainAxisAlignment.center,
+        children: [
+          if (logo != null)
+            _shift(pw.Image(logo, height: l.logoImageHeight), l.logoOffsetX, l.logoOffsetY),
+          if (address.isNotEmpty)
+            pw.Padding(
+              padding: pw.EdgeInsets.only(top: l.headerAddressTopPadding),
+              child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                if (_locationIconImage != null) ...[
+                  pw.Image(_locationIconImage!, width: l.contactIconSize, height: l.contactIconSize),
+                  pw.SizedBox(width: l.headerIconToTextSpacing),
+                ],
+                pw.Expanded(
+                  child: pw.Text(address,
+                      style: pw.TextStyle(fontSize: l.headerSubTitleFontSize, color: c.subtleText)),
+                ),
+              ]),
+            ),
+        ],
+      ),
+    );
+
+    // ---- بخش میانی: نام فروشگاه، زیرعنوان (از تنظیمات)، ردیف تماس ----
+    final middleSection = pw.Expanded(
+      flex: 8,
+      child: pw.Column(
+        mainAxisAlignment: pw.MainAxisAlignment.center,
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          if (shopName.isNotEmpty)
+            pw.Text(shopName,
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(
+                    fontSize: l.headerCompanyNameFontSize,
+                    fontWeight: pw.FontWeight.bold,
+                    color: c.darkGray)),
+          if (subtitle.isNotEmpty) ...[
+            if (shopName.isNotEmpty) pw.SizedBox(height: _headerNameToSubtitleGap),
+            pw.Row(mainAxisAlignment: pw.MainAxisAlignment.center, children: [
+              subtitleDash(),
+              pw.SizedBox(width: l.headerIconToTextSpacing * 2),
+              pw.Text(subtitle,
+                  style: pw.TextStyle(
+                      fontSize: l.headerSubTitleFontSize + _headerSubtitleExtraFontSize,
+                      color: c.darkGray)),
+              pw.SizedBox(width: l.headerIconToTextSpacing * 2),
+              subtitleDash(),
+            ]),
+          ],
+          if (contactChildren.isNotEmpty) ...[
+            if (shopName.isNotEmpty || subtitle.isNotEmpty) pw.SizedBox(height: _headerSubtitleToContactGap),
+            pw.Row(mainAxisAlignment: pw.MainAxisAlignment.center, children: contactChildren),
+          ],
+        ],
+      ),
+    );
 
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
       pw.Container(height: l.topBarHeight, color: c.orange),
@@ -249,69 +370,13 @@ class PdfService {
         child: pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.center,
           children: [
-            // سمت راست: لوگوی کارگاه
-            _shift(
-              logo != null
-                  ? pw.Image(logo, height: l.logoImageHeight)
-                  : pw.Text(settings.shopName,
-                      style: pw.TextStyle(
-                          fontSize: l.headerCompanyNameFontSize,
-                          fontWeight: pw.FontWeight.bold,
-                          color: c.darkGray)),
-              l.logoOffsetX,
-              l.logoOffsetY,
-            ),
+            // سمت راست: لوگو + آدرس
+            rightSection,
             pw.SizedBox(width: l.headerSectionGap),
             _headerDivider(l, c),
             pw.SizedBox(width: l.headerSectionGap),
-            // بخش میانی: تلفن، آدرس، اینستاگرام
-            pw.Expanded(
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                mainAxisAlignment: pw.MainAxisAlignment.center,
-                children: [
-                  if (phone.isNotEmpty)
-                    pw.Row(children: [
-                      if (_phoneIconImage != null) ...[
-                        pw.Image(_phoneIconImage!, width: l.contactIconSize, height: l.contactIconSize),
-                        pw.SizedBox(width: l.headerIconToTextSpacing),
-                      ],
-                      pw.Text(PersianDateUtil.toPersianDigits(phone),
-                          style: pw.TextStyle(fontSize: l.headerContactFontSize, color: c.orange)),
-                    ]),
-                  if (address.isNotEmpty)
-                    pw.Padding(
-                      padding: pw.EdgeInsets.only(top: l.headerAddressTopPadding),
-                      child: pw.Row(children: [
-                        if (_locationIconImage != null) ...[
-                          pw.Image(_locationIconImage!, width: l.contactIconSize, height: l.contactIconSize),
-                          pw.SizedBox(width: l.headerIconToTextSpacing),
-                        ],
-                        pw.Flexible(
-                          child: pw.Text(address,
-                              style: pw.TextStyle(fontSize: l.headerSubTitleFontSize, color: c.subtleText)),
-                        ),
-                      ]),
-                    ),
-                  if (showInstagram)
-                    pw.Padding(
-                      padding: pw.EdgeInsets.only(top: l.headerAddressTopPadding),
-                      child: pw.Row(children: [
-                        if (l.instagramIconVisible && igIcon != null) ...[
-                          pw.Image(igIcon,
-                              width: l.instagramIconSize,
-                              height: l.instagramIconSize,
-                              fit: pw.BoxFit.contain),
-                          pw.SizedBox(width: l.headerIconToTextSpacing),
-                        ],
-                        pw.Text(instagramUser,
-                            textDirection: pw.TextDirection.ltr,
-                            style: pw.TextStyle(fontSize: l.headerContactFontSize, color: c.darkGray)),
-                      ]),
-                    ),
-                ],
-              ),
-            ),
+            // بخش میانی: نام فروشگاه، زیرعنوان، تماس
+            middleSection,
             pw.SizedBox(width: l.headerSectionGap),
             _headerDivider(l, c),
             pw.SizedBox(width: l.headerSectionGap),
@@ -325,7 +390,7 @@ class PdfService {
               ]),
               if (_iconsRowImage != null) ...[
                 pw.SizedBox(width: l.headerInfoToIconsRowSpacing),
-                _shift(pw.Image(_iconsRowImage!, height: l.iconsRowImageHeight), l.iconsOffsetX,
+                _shift(pw.Image(_iconsRowImage!, height: l.iconsRowImageHeight * _headerIconsRowScale), l.iconsOffsetX,
                     l.iconsOffsetY),
               ],
             ]),
