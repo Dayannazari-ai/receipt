@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _autoBackup = AutoBackupService();
 
   late TextEditingController _shopName;
+  late TextEditingController _headerSubtitle;
   late TextEditingController _contactNumber;
   late TextEditingController _address;
   late TextEditingController _startNumber;
@@ -58,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final hasPassword = await _authService.hasPassword();
     final autoBackupDir = await _autoBackup.getBackupDir();
     _shopName = TextEditingController(text: settings.shopName);
+    _headerSubtitle = TextEditingController(text: settings.headerSubtitle);
     _contactNumber = TextEditingController(text: settings.contactNumber);
     _address = TextEditingController(text: settings.address);
     _startNumber = TextEditingController(text: settings.invoiceStartNumber.toString());
@@ -82,6 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final stampPath = _stampPathCtrl.text.trim();
       await _repo.saveSettings(AppSettings(
         shopName: _shopName.text.trim(),
+        headerSubtitle: _headerSubtitle.text.trim(),
         contactNumber: _contactNumber.text.trim(),
         address: _address.text.trim(),
         invoiceStartNumber: int.tryParse(_startNumber.text.trim()) ?? 1001,
@@ -305,6 +308,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Text('اطلاعات فروشگاه', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
           const SizedBox(height: 12),
           TextField(controller: _shopName, decoration: const InputDecoration(labelText: 'نام فروشگاه/تعمیرگاه')),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _headerSubtitle,
+            decoration: const InputDecoration(
+              labelText: 'عبارت زیر نام فروشگاه در سربرگ فاکتور',
+              helperText: 'اگر خالی بگذارید، در سربرگ نمایش داده نمی‌شود',
+            ),
+          ),
           const SizedBox(height: 12),
           TextField(controller: _contactNumber, decoration: const InputDecoration(labelText: 'شماره تماس'), keyboardType: TextInputType.phone),
           const SizedBox(height: 12),
