@@ -55,6 +55,33 @@ class InvoiceRepository {
     return '$prefix/${maxNum + 1}';
   }
 
+  /// شماره‌های آزادشده‌ی یک نوع فاکتور: شماره‌ی اصلیِ فاکتورهای باطل‌شده
+  /// (مثلاً SL/125 از ردیفی که به SL/125~باطل-17 تغییر نام داده) که الان
+  /// هیچ فاکتور فعال یا پیش‌فاکتوری از همان سری از آن استفاده نمی‌کند.
+  /// نتیجه بدون تکرار و به ترتیب عددی صعودی است. فقط خواندن؛ چیزی تغییر
+  /// نمی‌کند.
+  Future<List<String>> getFreedNumbers(InvoiceType type) async {
+    final db = await _db.database;
+    final prefix = _prefixFor(type);
+    final rows = await db.query('invoices',
+        columns: ['invoice_number'], where: 'invoice_number LIKE ?', whereArgs: ['$prefix/%']);
+    final used = <String>{};
+    final freed = <String>{};
+    for (final row in rows) {
+      final number = row['invoice_number'] as String;
+      final tilde = number.indexOf('~');
+      if (tilde == -1) {
+        used.add(number);
+      } else {
+        final original = number.substring(0, tilde);
+        if (int.tryParse(original.split('/').last) != null) freed.add(original);
+      }
+    }
+    final result = freed.where((n) => !used.contains(n)).toList();
+    result.sort((a, b) => int.parse(a.split('/').last).compareTo(int.parse(b.split('/').last)));
+    return result;
+  }
+
   /// شماره‌ی سری پیش‌فاکتور (مثلاً DRAFT/1، DRAFT/2). کاملاً مستقل از سری
   /// فاکتورهای اصلی؛ هیچ عددی از سری اصلی را مصرف نمی‌کند.
   Future<String> getNextDraftNumber() async {
