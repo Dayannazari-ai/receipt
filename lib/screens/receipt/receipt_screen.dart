@@ -21,6 +21,7 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../../utils/thousands_input_formatter.dart';
 import '../invoices/invoice_detail_screen.dart';
+import '../invoices/invoice_preview_screen.dart';
 import '../products/barcode_scanner_screen.dart';
 import '../vehicles/vehicle_picker_sheet.dart';
 import '../voice_search_sheet.dart';
@@ -61,9 +62,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   bool _issuing = false;
   bool _loadingInitial = true;
   String _nextInvoiceNumber = '';
+  // شماره‌ی آزادشده‌ای که کاربر دستی انتخاب کرده؛ null یعنی شماره‌ی بعدیِ خودکار.
+  String? _manualNumber;
   bool _hasFinanceAccount = false;
   bool _financePay = true;
   DateTime _issueDateTime = DateTime.now();
+
+  /// شماره‌ای که این فاکتور با آن صادر می‌شود (دستی یا خودکار).
+  String get _activeNumber => _manualNumber ?? _nextInvoiceNumber;
 
   @override
   void initState() {
@@ -90,6 +96,28 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _refreshInvoiceNumber() async {
     final nextNum = await _invoiceService.nextInvoiceNumber(_type);
     if (mounted) setState(() => _nextInvoiceNumber = nextNum);
+  }
+
+  /// انتخاب دستی یکی از شماره‌های آزادشده‌ی (باطل‌شده) همین نوع فاکتور.
+  Future<void> _pickInvoiceNumber() async {
+    final freed = await _invoiceService.freedNumbers(_type);
+    if (!mounted) return;
+    final others = freed.where((n) => n != _nextInvoiceNumber).toList();
+    if (others.isEmpty) {
+      _showMsg('شماره‌ی آزادشده‌ی دیگری برای این نوع فاکتور وجود ندارد');
+      return;
+    }
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _InvoiceNumberPickerSheet(
+        nextNumber: _nextInvoiceNumber,
+        freedNumbers: others,
+        selected: _activeNumber,
+      ),
+    );
+    if (choice == null) return;
+    setState(() => _manualNumber = choice == _nextInvoiceNumber ? null : choice);
   }
 
   double get _itemsTotal => _lines.fold(0.0, (s, l) => s + l.total);
@@ -365,6 +393,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   }
 
   /// Dialog انتخاب نوع ذخیره: صدور فاکتور اصلی، ذخیره به‌عنوان پیش‌فاکتور، یا انصراف.
+  /// «صدور فاکتور اصلی» اول پیش‌نمایش نشان می‌دهد و فقط با تأیید نهایی صادر می‌کند.
   Future<void> _showIssueDialog() async {
     if (!_validateBeforeIssue()) return;
     if (!mounted) return;
@@ -393,10 +422,70 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       ),
     );
     if (choice == 'final') {
-      await _issueAsFinal();
+      final confirmed = await _showPreview();
+      if (confirmed) await _issueAsFinal();
     } else if (choice == 'draft') {
       await _issueAsDraft();
     }
+  }
+
+  /// پیش‌نمایش فاکتور قبل از صدور نهایی. هیچ چیزی در دیتابیس ثبت نمی‌شود؛
+  /// آبجکت‌های موقت ساخته و فقط PDF نمایش داده می‌شود. true = تأیید نهایی.
+  Future<bool> _showPreview() async {
+    final customerName = _nameCtrl.text.trim();
+    final customer =
+        customerName.isEmpty ? null : Customer(name: customerName, mobile: _mobileCtrl.text.trim());
+    // مثل صدور واقعی: خودرو فقط وقتی نمایش داده می‌شود که متعلق به مشتریِ انتخاب‌شده باشد.
+    final vehicleLabel = (_selectedVehicle != null &&
+            _selectedCustomerId != null &&
+            _selectedVehicle!.customerId == _selectedCustomerId)
+        ? _selectedVehicleLabel
+        : '';
+
+    final invoice = Invoice(
+      invoiceNumber: _activeNumber,
+      type: _type,
+      issueDate: _issueDateTime.toIso8601String(),
+      itemsTotal: _itemsTotal,
+      sideCosts: _sideCostsTotal,
+      finalAmount: _finalAmount,
+      paymentType: _paymentType,
+      paymentAccountInfo:
+          _selectedAccount != null ? '${_selectedAccount!.title}: ${_selectedAccount!.number}' : null,
+      checkDueDate: _checkDueDate?.toIso8601String(),
+      notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+      isDraft: 0,
+      mileageKm: _parseKm(),
+    );
+    final items = _lines
+        .map((l) => InvoiceItem(
+              invoiceId: 0,
+              itemType: l.itemType,
+              serviceId: l.serviceId,
+              productId: l.productId,
+              description: l.description,
+              itemCode: l.itemCode,
+              quantity: l.quantity,
+              unitPrice: l.unitPrice,
+              total: l.total,
+            ))
+        .toList();
+    final sideCosts =
+        _sideCosts.map((c) => SideCost(invoiceId: 0, title: c.title, amount: c.amount)).toList();
+
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => InvoicePreviewScreen(
+          invoice: invoice,
+          items: items,
+          sideCosts: sideCosts,
+          customer: customer,
+          settings: _settings,
+          vehicleLabel: vehicleLabel,
+        ),
+      ),
+    );
+    return ok == true;
   }
 
   /// پیدا کردن یا ساختن مشتری واقعی. اگر مشتری با شناسه انتخاب نشده ولی نام
@@ -428,6 +517,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     _clearVehicle();
     _issueDateTime = DateTime.now();
     _checkDueDate = null;
+    _manualNumber = null;
   }
 
   /// صدور فاکتور اصلی. منطق دقیقاً مثل قبل است؛ فقط vehicleId هم منتقل می‌شود.
@@ -456,6 +546,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         issueDateTime: _issueDateTime,
         checkDueDate: _checkDueDate?.toIso8601String(),
+        manualInvoiceNumber: _manualNumber,
       );
 
       if (mounted) {
@@ -465,7 +556,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         _init();
       }
     } catch (e) {
-      _showMsg('خطا در صدور فاکتور: $e');
+      _showMsg('خطا در صدور فاکتور: ${e is StateError ? e.message : e}');
     } finally {
       if (mounted) setState(() => _issuing = false);
     }
@@ -529,6 +620,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       _paymentType = PaymentType.cash;
       _issueDateTime = DateTime.now();
       _checkDueDate = null;
+      _manualNumber = null;
     });
   }
 
@@ -568,7 +660,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   label: Text(PersianDateUtil.formatFullWithIcon(_issueDateTime)),
                 ),
               ),
-              Chip(label: Text('فاکتور ${PersianDateUtil.toPersianDigits(_nextInvoiceNumber)}')),
+              GestureDetector(
+                onTap: _pickInvoiceNumber,
+                child: Chip(
+                  avatar: const Icon(Icons.swap_vert, size: 16),
+                  backgroundColor: _manualNumber != null ? Colors.orange.shade100 : null,
+                  label: Text('فاکتور ${PersianDateUtil.toPersianDigits(_activeNumber)}'),
+                ),
+              ),
             ]),
           ]),
         ),
@@ -579,7 +678,10 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           items: InvoiceType.values.map((t) => DropdownMenuItem(value: t, child: Text(t.label))).toList(),
           onChanged: (t) {
             if (t != null) {
-              setState(() => _type = t);
+              setState(() {
+                _type = t;
+                _manualNumber = null; // شماره‌ی دستی مخصوص همان نوع قبلی بود
+              });
               _refreshInvoiceNumber();
             }
           },
@@ -772,6 +874,55 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         const SizedBox(height: 10),
         TextButton(onPressed: _clearDraft, child: const Text('پاک کردن پیش‌نویس', style: TextStyle(color: Colors.red))),
       ]),
+    );
+  }
+}
+
+// ---------------- Invoice number picker ----------------
+
+/// انتخاب شماره‌ی فاکتور: شماره‌ی بعدیِ خودکار یا یکی از شماره‌های آزادشده.
+/// خروجی: شماره‌ی انتخاب‌شده (String)؛ با بستن بدون انتخاب، null.
+class _InvoiceNumberPickerSheet extends StatelessWidget {
+  final String nextNumber;
+  final List<String> freedNumbers;
+  final String selected;
+  const _InvoiceNumberPickerSheet({
+    required this.nextNumber,
+    required this.freedNumbers,
+    required this.selected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget tile(String number, String subtitle) => ListTile(
+          title: Text(PersianDateUtil.toPersianDigits(number)),
+          subtitle: Text(subtitle),
+          trailing: number == selected ? const Icon(Icons.check_circle, color: Colors.green) : null,
+          onTap: () => Navigator.of(context).pop(number),
+        );
+
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('انتخاب شماره‌ی فاکتور', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+          Flexible(
+            child: ListView(shrinkWrap: true, children: [
+              tile(nextNumber, 'شماره‌ی بعدی (خودکار)'),
+              const Divider(),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Text('شماره‌های آزادشده (فاکتور باطل‌شده)',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ),
+              ...freedNumbers.map((n) => tile(n, 'آزادشده')),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 }
