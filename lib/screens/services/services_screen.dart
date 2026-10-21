@@ -66,6 +66,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
   int? _filterModelId;
   String _sortBy = 'name'; // 'name' یا 'code'
 
+  // حالت انتخاب گروهی (برای حذف دسته‌جمعی)
+  bool _selecting = false;
+  final Set<int> _selected = {};
+
   @override
   void initState() {
     super.initState();
@@ -111,6 +115,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
     if (!mounted) return;
     setState(() {
+      // فقط مواردی که الان در لیست دیده می‌شوند انتخاب بمانند
+      // (با تغییر جستجو/فیلتر، مورد مخفی هرگز حذف نشود)
+      final catIds = categories.map((c) => c.id).toSet();
+      final visibleIds = services.where((s) => catIds.contains(s.categoryId)).map((s) => s.id).toSet();
+      _selected.removeWhere((id) => !visibleIds.contains(id));
       _categories = categories;
       _services = services;
       _brands = brands;
@@ -164,6 +173,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
             onTap: () => Navigator.pop(ctx, 'edit'),
           ),
           ListTile(
+            leading: const Icon(Icons.checklist),
+            title: const Text('انتخاب گروهی'),
+            onTap: () => Navigator.pop(ctx, 'select'),
+          ),
+          ListTile(
             leading: const Icon(Icons.delete_outline, color: Colors.red),
             title: const Text('حذف', style: TextStyle(color: Colors.red)),
             onTap: () => Navigator.pop(ctx, 'delete'),
@@ -173,6 +187,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
     if (action == 'edit') {
       _addOrEditService(service: service);
+    } else if (action == 'select') {
+      _enterSelection(service);
     } else if (action == 'delete') {
       _confirmDeleteService(service);
     }
@@ -196,6 +212,113 @@ class _ServicesScreenState extends State<ServicesScreen> {
     }
   }
 
+  // ---------- انتخاب گروهی و حذف دسته‌جمعی ----------
+
+  /// خدماتی که واقعاً در لیست نمایش داده می‌شوند (دسته‌بندی‌شان موجود است).
+  Iterable<ServiceItem> get _visibleServices {
+    final catIds = _categories.map((c) => c.id).toSet();
+    return _services.where((s) => catIds.contains(s.categoryId));
+  }
+
+  bool get _allSelected {
+    final vis = _visibleServices.toList();
+    return vis.isNotEmpty && vis.every((s) => _selected.contains(s.id));
+  }
+
+  void _enterSelection(ServiceItem? first) {
+    setState(() {
+      _selecting = true;
+      _selected.clear();
+      if (first?.id != null) _selected.add(first!.id!);
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selected.clear();
+    });
+  }
+
+  void _toggleService(ServiceItem s) {
+    final id = s.id;
+    if (id == null) return;
+    setState(() {
+      if (!_selected.remove(id)) _selected.add(id);
+    });
+  }
+
+  void _toggleAll() {
+    setState(() {
+      if (_allSelected) {
+        _selected.clear();
+      } else {
+        _selected
+          ..clear()
+          ..addAll(_visibleServices.map((s) => s.id!));
+      }
+    });
+  }
+
+  void _toggleCategory(List<ServiceItem> list) {
+    final ids = list.map((s) => s.id!).toList();
+    setState(() {
+      if (ids.every(_selected.contains)) {
+        _selected.removeAll(ids);
+      } else {
+        _selected.addAll(ids);
+      }
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selected.isEmpty) return;
+    final count = _selected.length;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('حذف گروهی خدمات'),
+        content: Text('$count خدمت حذف می‌شود.\nفاکتورهای قبلی و اقلام آن‌ها هیچ تغییری نمی‌کنند.\nادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await _serviceRepo.softDeleteMany(_selected.toList());
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$count خدمت حذف شد')));
+    setState(() {
+      _selecting = false;
+      _selected.clear();
+    });
+    _load();
+  }
+
+  AppBar _selectionAppBar() {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.close),
+        tooltip: 'خروج از انتخاب',
+        onPressed: _exitSelection,
+      ),
+      title: Text('${_selected.length} انتخاب شده'),
+      actions: [
+        IconButton(
+          icon: Icon(_allSelected ? Icons.deselect : Icons.select_all),
+          tooltip: _allSelected ? 'لغو انتخاب همه' : 'انتخاب همه',
+          onPressed: _visibleServices.isEmpty ? null : _toggleAll,
+        ),
+        IconButton(
+          icon: Icon(Icons.delete_outline, color: _selected.isEmpty ? null : Colors.red),
+          tooltip: 'حذف انتخاب‌شده‌ها',
+          onPressed: _selected.isEmpty ? null : _deleteSelected,
+        ),
+      ],
+    );
+  }
+
   String _brandLabel(ServiceItem s) {
     if (s.brandId == null) return 'همه برندها';
     final name = _brandNames[s.brandId] ?? '؟';
@@ -217,7 +340,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('خدمات'), actions: [
+      appBar: _selecting
+          ? _selectionAppBar()
+          : AppBar(title: const Text('خدمات'), actions: [
         PopupMenuButton<String>(
           icon: const Icon(Icons.sort),
           tooltip: 'مرتب‌سازی',
@@ -234,6 +359,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
               child: const Text('بر اساس کد'),
             ),
           ],
+        ),
+        IconButton(
+          icon: const Icon(Icons.checklist),
+          tooltip: 'انتخاب گروهی',
+          onPressed: () => _enterSelection(null),
         ),
         IconButton(icon: const Icon(Icons.create_new_folder_outlined), onPressed: _addCategory),
       ]),
@@ -298,19 +428,34 @@ class _ServicesScreenState extends State<ServicesScreen> {
                         if (list.isEmpty && (_searchCtrl.text.isNotEmpty || _filterBrandId != null)) {
                           return const SizedBox.shrink();
                         }
+                        final selCount = list.where((s) => _selected.contains(s.id)).length;
                         return ExpansionTile(
+                          leading: (_selecting && list.isNotEmpty)
+                              ? Checkbox(
+                                  tristate: true,
+                                  value: selCount == 0 ? false : (selCount == list.length ? true : null),
+                                  onChanged: (_) => _toggleCategory(list),
+                                )
+                              : null,
                           title: Text(cat.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                           children: list.isEmpty
                               ? [const ListTile(title: Text('خدمتی ثبت نشده'))]
                               : list.map((s) => GestureDetector(
-                                        onLongPress: () => _showServiceActions(s),
+                                        onLongPress: _selecting ? () => _toggleService(s) : () => _showServiceActions(s),
                                         child: ListTile(
+                                          leading: _selecting
+                                              ? Checkbox(
+                                                  value: _selected.contains(s.id),
+                                                  onChanged: (_) => _toggleService(s),
+                                                )
+                                              : null,
+                                          selected: _selecting && _selected.contains(s.id),
                                           title: Text(s.name),
                                           subtitle: Text(_sortBy == 'code'
                                               ? 'کد: ${s.code} - ${_brandLabel(s)}'
                                               : _brandLabel(s)),
                                           trailing: Text(CurrencyFormatter.format(s.price, _currency)),
-                                          onTap: () => _addOrEditService(service: s),
+                                          onTap: _selecting ? () => _toggleService(s) : () => _addOrEditService(service: s),
                                         ),
                                       ))
                                   .toList(),
@@ -320,11 +465,13 @@ class _ServicesScreenState extends State<ServicesScreen> {
         ),
       ]),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.add),
-        label: const Text('خدمت جدید'),
-        onPressed: () => _addOrEditService(),
-      ),
+      floatingActionButton: _selecting
+          ? null
+          : FloatingActionButton.extended(
+              icon: const Icon(Icons.add),
+              label: const Text('خدمت جدید'),
+              onPressed: () => _addOrEditService(),
+            ),
     );
   }
 }
