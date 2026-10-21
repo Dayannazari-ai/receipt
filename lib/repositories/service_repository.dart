@@ -56,6 +56,26 @@ class ServiceRepository {
     return db.update('services', {'is_deleted': 1}, where: 'id = ?', whereArgs: [id]);
   }
 
+  /// حذف نرم گروهی: فقط ستون is_deleted همین خدمات ۱ می‌شود (مثل حذف تکی).
+  /// به جدول فاکتورها و اقلام آن‌ها و تاریخچه قیمت دست نمی‌زند.
+  /// همه در یک تراکنش انجام می‌شود: یا همه حذف می‌شوند یا هیچ‌کدام.
+  Future<int> softDeleteMany(List<int> ids) async {
+    if (ids.isEmpty) return 0;
+    final db = await _db.database;
+    return db.transaction((txn) async {
+      var affected = 0;
+      const chunkSize = 500;
+      for (var i = 0; i < ids.length; i += chunkSize) {
+        final end = (i + chunkSize < ids.length) ? i + chunkSize : ids.length;
+        final chunk = ids.sublist(i, end);
+        final placeholders = List.filled(chunk.length, '?').join(',');
+        affected += await txn.rawUpdate(
+            'UPDATE services SET is_deleted = 1 WHERE id IN ($placeholders)', chunk);
+      }
+      return affected;
+    });
+  }
+
   Future<ServiceItem?> getById(int id) async {
     final db = await _db.database;
     final rows = await db.query('services', where: 'id = ?', whereArgs: [id]);
