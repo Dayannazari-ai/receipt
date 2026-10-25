@@ -11,6 +11,7 @@ import '../models/invoice_layout_settings.dart';
 import '../utils/currency_formatter.dart';
 import '../utils/persian_date.dart';
 import 'invoice_layout_storage.dart';
+import 'visit_comparison.dart';
 
 /// رنگ‌های PDF که از [InvoiceLayoutSettings] ساخته می‌شوند.
 class _Palette {
@@ -150,6 +151,7 @@ class PdfService {
 
     await _loadFonts();
     await _loadImages();
+    final visit = await VisitComparison.load(invoice);
 
     // لوگو و آیکون اینستاگرام: انتخاب کاربر در صورت وجود، وگرنه پیش‌فرض assets.
     final headerLogo = await _tryLoadFileImage(l.logoCustomPath) ?? _logoImage;
@@ -214,6 +216,13 @@ class PdfService {
               pw.SizedBox(height: l.spacingAfterTotals),
               if (settings.termsText.isNotEmpty) _termsSection(l, c, settings.termsText),
               pw.SizedBox(height: l.spacingAfterTerms),
+                            if (visit != null) ...[
+                visit.build(
+                    borderColor: c.border,
+                    textColor: c.darkGray,
+                    horizontalPadding: l.tableCellHorizontalPadding),
+                pw.SizedBox(height: l.signatureLabelTopSpacing * 2),
+              ],
               _shift(_signatureRow(l, c, stampImage), l.signatureOffsetX, l.signatureOffsetY),
               pw.SizedBox(height: l.pageBottomExtraSpacing),
             ]),
