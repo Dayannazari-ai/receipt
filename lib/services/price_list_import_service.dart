@@ -20,10 +20,29 @@ class PriceListImportService {
     return double.tryParse(text.replaceAll(',', ''));
   }
 
-  List<(String, String?, double)> _extractEntries(String path) {
+  /// نرمال‌سازی نام فقط برای مقایسه (ی/ي، ک/ك، نیم‌فاصله، فاصله‌ی اضافی، حروف بزرگ/کوچک)
+  String _norm(String s) => s
+      .replaceAll('ي', 'ی')
+      .replaceAll('ك', 'ک')
+      .replaceAll('\u200c', ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim()
+      .toLowerCase();
+
+  /// سرستون خودرو: «برند|مدل». اگر «|» نباشد، کل متن برند است (مثل قبل).
+  (String, String?) _splitHeader(String text) {
+    final i = text.indexOf('|');
+    if (i < 0) return (text.trim(), null);
+    final brand = text.substring(0, i).trim();
+    final model = text.substring(i + 1).trim();
+    if (brand.isEmpty) return (text.replaceAll('|', '').trim(), null);
+    return (brand, model.isEmpty ? null : model);
+  }
+
+  List<(String, String?, String?, double)> _extractEntries(String path) {
     final bytes = File(path).readAsBytesSync();
     final excel = Excel.decodeBytes(bytes);
-    final entries = <(String, String?, double)>[];
+    final entries = <(String, String?, String?, double)>[];
 
     for (final sheet in excel.tables.values) {
       if (sheet.maxRows == 0) continue;
@@ -44,10 +63,10 @@ class PriceListImportService {
       }
       if (serviceColIndex == null) continue;
 
-      final brandCols = <int, String>{};
+      final brandCols = <int, (String, String?)>{};
       for (var i = 0; i < serviceColIndex; i++) {
         final text = _cellText(header[i]?.value);
-        if (text != null) brandCols[i] = text;
+        if (text != null) brandCols[i] = _splitHeader(text);
       }
       final isFlat = brandCols.length <= 1;
 
@@ -63,13 +82,13 @@ class PriceListImportService {
           if (row.length <= priceIdx) continue;
           final price = _cellNumber(row[priceIdx]?.value);
           if (price == null) continue;
-          entries.add((name, null, price));
+          entries.add((name, null, null, price));
         } else {
           for (final entry in brandCols.entries) {
             if (row.length <= entry.key) continue;
             final price = _cellNumber(row[entry.key]?.value);
             if (price == null) continue;
-            entries.add((name, entry.value, price));
+            entries.add((name, entry.value.$1, entry.value.$2, price));
           }
         }
       }
@@ -81,7 +100,13 @@ class PriceListImportService {
     final entries = _extractEntries(path);
     return entries
         .take(15)
-        .map((e) => {'name': e.$1, 'brand': e.$2 ?? 'همه برندها', 'price': e.$3})
+        .map((e) => {
+              'name': e.$1,
+              'brand': e.$2 == null
+                  ? 'همه برندها'
+                  : (e.$3 == null ? e.$2! : '${e.$2} - ${e.$3}'),
+              'price': e.$4,
+            })
         .toList();
   }
 
@@ -98,23 +123,48 @@ class PriceListImportService {
     }
 
     final existingBrands = await _vehicleRepo.getAllBrands();
-    final Map<String, int> brandIdByName = {for (final b in existingBrands) b.name: b.id!};
+    final Map<String, int> brandIdByName = {
+      for (final b in existingBrands) _norm(b.name): b.id!
+    };
+    final Map<int, Map<String, int>> modelIdByBrand = {};
     int brandsAdded = 0;
+
+    Future<Map<String, int>> modelsOf(int brandId) async {
+      final cached = modelIdByBrand[brandId];
+      if (cached != null) return cached;
+      final list = await _vehicleRepo.getModelsByBrand(brandId);
+      final map = <String, int>{for (final m in list) _norm(m.name): m.id!};
+      modelIdByBrand[brandId] = map;
+      return map;
+    }
 
     final existingServices = await _serviceRepo.getAll();
     int counter = existingServices.length + 1;
     int servicesAdded = 0;
 
     for (final entry in entries) {
-      final (name, brandName, price) = entry;
+      final (name, brandName, modelName, price) = entry;
       int? brandId;
+      int? modelId;
       if (brandName != null) {
-        if (!brandIdByName.containsKey(brandName)) {
+        final bKey = _norm(brandName);
+        if (!brandIdByName.containsKey(bKey)) {
           final id = await _vehicleRepo.insertBrand(brandName);
-          brandIdByName[brandName] = id;
+          brandIdByName[bKey] = id;
           brandsAdded++;
         }
-        brandId = brandIdByName[brandName];
+        brandId = brandIdByName[bKey];
+
+        if (modelName != null && brandId != null) {
+          final models = await modelsOf(brandId);
+          final mKey = _norm(modelName);
+          var mid = models[mKey];
+          if (mid == null) {
+            mid = await _vehicleRepo.insertModel(brandId, modelName);
+            models[mKey] = mid;
+          }
+          modelId = mid;
+        }
       }
 
       final code = 'IMP-${counter.toString().padLeft(4, '0')}';
@@ -124,7 +174,7 @@ class PriceListImportService {
         code: code,
         categoryId: categoryId,
         brandId: brandId,
-        modelId: null,
+        modelId: modelId,
         price: price,
         notes: 'وارد‌شده از فایل نرخ‌نامه',
       ));
