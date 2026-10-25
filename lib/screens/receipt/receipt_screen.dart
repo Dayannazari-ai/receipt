@@ -16,6 +16,7 @@ import '../../repositories/vehicle_reference_repository.dart';
 import '../../repositories/payment_account_repository.dart';
 import '../../repositories/settings_repository.dart';
 import '../../repositories/finance_repository.dart';
+import '../../repositories/invoice_visit_repository.dart';
 import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
@@ -47,6 +48,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   final _mobileCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _kmCtrl = TextEditingController();
+  final _visitRepo = InvoiceVisitRepository();
+  String? _autoKm; // آخرین کیلومتری که خودکار پر شده
+
+  /// true یعنی عددِ داخل کادر را خود کاربر نوشته (نه پیش‌فرض خودکار).
+  bool get _kmUserEdited {
+    final t = ThousandsInputFormatter.unformat(_kmCtrl.text.trim());
+    return t.isNotEmpty && t != _autoKm;
+  }
 
   InvoiceType _type = InvoiceType.electrical;
   PaymentType _paymentType = PaymentType.onlinePayment;
@@ -152,9 +161,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   void _showMsg(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  void _clearVehicle() {
+    void _clearVehicle() {
     _selectedVehicle = null;
     _selectedVehicleLabel = '';
+    // کیلومترِ خودکارِ خودروی قبلی نباید بماند؛ عددِ دستیِ کاربر دست‌نخورده می‌ماند.
+    if (!_kmUserEdited) _kmCtrl.clear();
+    _autoKm = null;
   }
 
   // ---------------- انتخاب مشتری (کادر بازشونده با جست‌وجوی لحظه‌ای) ----------------
@@ -287,9 +299,42 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       modelName,
     ].where((p) => p.isNotEmpty).toList();
     if (!mounted) return;
-    setState(() {
+        setState(() {
       _selectedVehicle = v;
       _selectedVehicleLabel = parts.isEmpty ? 'خودروی بدون مشخصات' : parts.join(' - ');
+    });
+    _applyDefaultKm(v);
+  }
+
+  /// کیلومتر پیش‌فرض = آخرین کیلومتر ثبت‌شده‌ی همین خودرو. قابل ویرایش است.
+  /// اگر کاربر خودش عددی نوشته باشد، بی‌خبر جایگزین نمی‌شود؛ فقط پیشنهاد می‌شود.
+  Future<void> _applyDefaultKm(Vehicle v) async {
+    if (v.id == null) return;
+    final km = await _visitRepo.getLastMileage(v.id!);
+    if (!mounted || _selectedVehicle?.id != v.id) return;
+    if (_kmUserEdited) {
+      if (km != null && _parseKm() != km) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('آخرین کیلومتر ثبت‌شده‌ی این خودرو: ${CurrencyFormatter.formatPlain(km)}'),
+          action: SnackBarAction(
+            label: 'جایگزینی',
+            onPressed: () => setState(() {
+              _kmCtrl.text = '$km';
+              _autoKm = '$km';
+            }),
+          ),
+        ));
+      }
+      return;
+    }
+    setState(() {
+      if (km == null) {
+        _kmCtrl.clear();
+        _autoKm = null;
+      } else {
+        _kmCtrl.text = '$km';
+        _autoKm = '$km';
+      }
     });
   }
 
@@ -542,7 +587,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           _selectedAccount != null ? '${_selectedAccount!.title}: ${_selectedAccount!.number}' : null,
       checkDueDate: _checkDueDate?.toIso8601String(),
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-      isDraft: 0,
+            isDraft: 0,
+      vehicleId: (_selectedVehicle != null &&
+              _selectedCustomerId != null &&
+              _selectedVehicle!.customerId == _selectedCustomerId)
+          ? _selectedVehicle!.id
+          : null,
       mileageKm: _parseKm(),
     );
     final items = _lines
