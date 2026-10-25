@@ -104,11 +104,11 @@ class VehicleReferenceRepository {
     final existing = await getAllBrands();
     if (existing.isNotEmpty) return;
     final defaults = <String, List<String>>{
-      'پژو': ['206', '405', 'پارس', 'پارس ELX'],
-      'سمند': ['سمند', 'دنا', 'دنا EF7'],
-      'پراید': ['پراید', 'تیبا', 'ساینا', 'کوییک'],
+      'پژو': ['206', '207', '405', 'پارس', 'پارس ELX'],
+      'ایران‌خودرو': ['سمند', 'سمند EF7', 'دنا', 'دنا EF7'],
+      'سایپا': ['پراید', 'تیبا', 'ساینا', 'کوییک'],
       'رنو': ['ال90', 'مگان', 'ساندرو'],
-      'سایپا': ['ریو'],
+      'کیا': ['ریو'],
     };
     for (final entry in defaults.entries) {
       final brandId = await insertBrand(entry.key);
