@@ -26,7 +26,7 @@ class DatabaseHelper {
   // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
   // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
   // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
-  static const int dbVersion = 10;
+  static const int dbVersion = 11;
 
   Database? _db;
 
@@ -323,6 +323,25 @@ class DatabaseHelper {
     ''',
     'CREATE INDEX IF NOT EXISTS idx_fin_chq_status ON finance_cheques(status, due_date)',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_chq_uid ON finance_cheques(backup_uid)',
+        // نسخه‌ی ۱۱: پرداخت‌ها/چک‌های هر فاکتور (هر چک مستقل پیگیری می‌شود).
+    '''
+      CREATE TABLE IF NOT EXISTS invoice_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER NOT NULL,
+        method TEXT NOT NULL,
+        amount REAL NOT NULL,
+        due_date TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        paid_date TEXT,
+        notes TEXT,
+        backup_uid TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+      )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_inv_pay_invoice ON invoice_payments(invoice_id)',
+    'CREATE INDEX IF NOT EXISTS idx_inv_pay_status ON invoice_payments(status, due_date)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_inv_pay_uid ON invoice_payments(backup_uid)',
     // هر فاکتور حداکثر یک چک دارد.
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_chq_invoice ON finance_cheques(invoice_id) WHERE invoice_id IS NOT NULL',
     // نسخه‌ی ۹: هزینه‌های خدماتی (ثبت دستی، مستقل از حساب فروش کالا).
@@ -428,6 +447,14 @@ class DatabaseHelper {
     if (oldVersion < 7) {
       // فقط دو جدول کاملاً جدید برای حساب مالی فروش کالا. هیچ جدول یا
       // ستون موجودی لمس نمی‌شود، پس داده‌ی قبلی تحت تأثیر قرار نمی‌گیرد.
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
+    }
+        if (oldVersion < 11) {
+      // نسخه ۱۱: جدول کاملاً جدید پرداخت‌ها/چک‌ها؛ داده‌ی قبلی لمس نمی‌شود.
       for (final sql in _financeSchema) {
         try {
           await db.execute(sql);
