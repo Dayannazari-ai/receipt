@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import '../database/database_helper.dart';
 import '../models/invoice.dart';
 import 'finance_invoice_posting.dart';
+import 'invoice_payment_repository.dart';
 import 'settings_repository.dart';
 
 class InvoiceRepository {
@@ -192,8 +193,9 @@ class InvoiceRepository {
         await txn.insert('side_costs', cost.toMap()..remove('id')..['invoice_id'] = invoiceId);
       }
 
-      if (!isDraft) {
+            if (!isDraft) {
         await FinanceInvoicePosting.onInvoiceIssued(txn, invoiceId: invoiceId);
+        await InvoicePaymentRepository.createForIssuedInvoice(txn, invoiceId: invoiceId);
       }
 
       return invoiceId;
@@ -261,6 +263,7 @@ class InvoiceRepository {
       }
 
       await FinanceInvoicePosting.onInvoiceIssued(txn, invoiceId: invoiceId);
+      await InvoicePaymentRepository.createForIssuedInvoice(txn, invoiceId: invoiceId);
 
       return newNumber;
     });
