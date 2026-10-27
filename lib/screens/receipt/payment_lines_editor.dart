@@ -2,15 +2,112 @@ import 'package:flutter/material.dart';
 import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 import '../../models/app_settings.dart';
+import '../../repositories/finance_repository.dart';
 import '../../repositories/invoice_payment_repository.dart';
+import '../../repositories/invoice_repository.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../../utils/thousands_input_formatter.dart';
 
 String _dateText(DateTime d) => PersianDateUtil.formatDateNumeric(d.toIso8601String());
 
-/// ویرایشگر ردیف‌های «پرداخت ترکیبی» داخل فرم رسید. فهرست را خودش نگه
-/// نمی‌دارد؛ هر تغییر را با [onChanged] به صفحه می‌دهد.
+/// پنجره‌ی افزودن/ویرایش یک ردیف پرداخت. null = انصراف.
+Future<PaymentLine?> showPaymentLineDialog(
+  BuildContext context, {
+  PaymentLine? existing,
+  required double remaining,
+  required Currency currency,
+}) async {
+  var method = existing?.method ?? PaymentMethods.cash;
+  DateTime? date = existing?.date;
+  final amountCtrl = TextEditingController(
+      text: (existing?.amount ?? (remaining > 0 ? remaining : 0)).toStringAsFixed(0));
+  final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+  String? error;
+
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setDlg) => AlertDialog(
+        title: Text(existing == null ? 'افزودن پرداخت' : 'ویرایش پرداخت'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String>(
+              value: method,
+              decoration: const InputDecoration(labelText: 'نوع پرداخت'),
+              items: PaymentMethods.labels.entries
+                  .map((e) => DropdownMenuItem<String>(value: e.key, child: Text(e.value)))
+                  .toList(),
+              onChanged: (v) => setDlg(() => method = v ?? PaymentMethods.cash),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: amountCtrl,
+              decoration: InputDecoration(labelText: 'مبلغ', suffixText: currency.label),
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsInputFormatter()],
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton(
+              onPressed: () async {
+                final j = await showPersianDatePicker(
+                  context: ctx,
+                  initialDate: Jalali.fromDateTime(date ?? DateTime.now()),
+                  firstDate: Jalali(1394, 1, 1),
+                  lastDate: Jalali(1450, 12, 29),
+                );
+                if (j != null) setDlg(() => date = j.toDateTime());
+              },
+              child: Text(
+                PaymentMethods.needsDueDate(method)
+                    ? (date == null ? 'تاریخ سررسید (الزامی)' : 'سررسید: ${_dateText(date!)}')
+                    : (date == null ? 'تاریخ پرداخت (پیش‌فرض: امروز/تاریخ فاکتور)' : 'تاریخ پرداخت: ${_dateText(date!)}'),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: notesCtrl,
+              decoration: const InputDecoration(labelText: 'توضیحات (اختیاری)'),
+              maxLines: 2,
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 8),
+              Text(error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(
+            onPressed: () {
+              final a = double.tryParse(ThousandsInputFormatter.unformat(amountCtrl.text.trim()));
+              if (a == null || a <= 0) {
+                setDlg(() => error = 'مبلغ باید بیشتر از صفر باشد');
+                return;
+              }
+              if (PaymentMethods.needsDueDate(method) && date == null) {
+                setDlg(() => error = 'برای چک و پرداخت توافقی، تاریخ سررسید لازم است');
+                return;
+              }
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('ثبت'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (ok != true) return null;
+  return PaymentLine(
+    method: method,
+    amount: double.parse(ThousandsInputFormatter.unformat(amountCtrl.text.trim())),
+    date: date,
+    notes: notesCtrl.text.trim(),
+  );
+}
+
+/// ویرایشگر ردیف‌های «پرداخت ترکیبی» داخل فرم رسید و ویرایش پیش‌فاکتور.
+/// فهرست را خودش نگه نمی‌دارد؛ هر تغییر را با [onChanged] به صفحه می‌دهد.
 class PaymentLinesEditor extends StatelessWidget {
   final List<PaymentLine> lines;
   final double total;
@@ -29,93 +126,13 @@ class PaymentLinesEditor extends StatelessWidget {
 
   Future<void> _edit(BuildContext context, {int? index}) async {
     final existing = index == null ? null : lines[index];
-    var method = existing?.method ?? PaymentMethods.cash;
-    DateTime? date = existing?.date;
-    final remaining = total - _sum + (existing?.amount ?? 0);
-    final amountCtrl = TextEditingController(
-        text: (existing?.amount ?? (remaining > 0 ? remaining : 0)).toStringAsFixed(0));
-    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
-    String? error;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
-          title: Text(existing == null ? 'افزودن پرداخت' : 'ویرایش پرداخت'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              DropdownButtonFormField<String>(
-                value: method,
-                decoration: const InputDecoration(labelText: 'نوع پرداخت'),
-                items: PaymentMethods.labels.entries
-                    .map((e) => DropdownMenuItem<String>(value: e.key, child: Text(e.value)))
-                    .toList(),
-                onChanged: (v) => setDlg(() => method = v ?? PaymentMethods.cash),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: amountCtrl,
-                decoration: InputDecoration(labelText: 'مبلغ', suffixText: currency.label),
-                keyboardType: TextInputType.number,
-                inputFormatters: [ThousandsInputFormatter()],
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton(
-                onPressed: () async {
-                  final j = await showPersianDatePicker(
-                    context: ctx,
-                    initialDate: Jalali.fromDateTime(date ?? DateTime.now()),
-                    firstDate: Jalali(1394, 1, 1),
-                    lastDate: Jalali(1450, 12, 29),
-                  );
-                  if (j != null) setDlg(() => date = j.toDateTime());
-                },
-                child: Text(
-                  PaymentMethods.needsDueDate(method)
-                      ? (date == null ? 'تاریخ سررسید (الزامی)' : 'سررسید: ${_dateText(date!)}')
-                      : (date == null ? 'تاریخ پرداخت (پیش‌فرض: تاریخ فاکتور)' : 'تاریخ پرداخت: ${_dateText(date!)}'),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: notesCtrl,
-                decoration: const InputDecoration(labelText: 'توضیحات (اختیاری)'),
-                maxLines: 2,
-              ),
-              if (error != null) ...[
-                const SizedBox(height: 8),
-                Text(error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-              ],
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
-            TextButton(
-              onPressed: () {
-                final a = double.tryParse(ThousandsInputFormatter.unformat(amountCtrl.text.trim()));
-                if (a == null || a <= 0) {
-                  setDlg(() => error = 'مبلغ باید بیشتر از صفر باشد');
-                  return;
-                }
-                if (PaymentMethods.needsDueDate(method) && date == null) {
-                  setDlg(() => error = 'برای چک و پرداخت توافقی، تاریخ سررسید لازم است');
-                  return;
-                }
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('ثبت'),
-            ),
-          ],
-        ),
-      ),
+    final line = await showPaymentLineDialog(
+      context,
+      existing: existing,
+      remaining: total - _sum + (existing?.amount ?? 0),
+      currency: currency,
     );
-    if (ok != true) return;
-    final line = PaymentLine(
-      method: method,
-      amount: double.parse(ThousandsInputFormatter.unformat(amountCtrl.text.trim())),
-      date: date,
-      notes: notesCtrl.text.trim(),
-    );
+    if (line == null) return;
     final next = [...lines];
     if (index == null) {
       next.add(line);
@@ -202,7 +219,14 @@ class PaymentLinesEditor extends StatelessWidget {
       );
 }
 
-/// خلاصه‌ی ردیف‌های پرداخت یک فاکتور ترکیبی (برای صفحه‌ی جزئیات فاکتور).
+class _SummaryData {
+  final List<PaymentLine> lines;
+  final bool isDraft;
+  const _SummaryData(this.lines, this.isDraft);
+}
+
+/// خلاصه‌ی ردیف‌های پرداخت یک فاکتور ترکیبی (صفحه‌ی جزئیات فاکتور). برای
+/// فاکتور صادرشده، دکمه‌ی «ثبت پرداخت برای مانده» دارد.
 class PaymentLinesSummary extends StatefulWidget {
   final int invoiceId;
   final double finalAmount;
@@ -219,21 +243,41 @@ class PaymentLinesSummary extends StatefulWidget {
 }
 
 class _PaymentLinesSummaryState extends State<PaymentLinesSummary> {
-  late Future<List<PaymentLine>> _future;
+  late Future<_SummaryData> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = InvoicePaymentRepository().getLines(widget.invoiceId);
+    _future = _load();
+  }
+
+  Future<_SummaryData> _load() async {
+    final lines = await InvoicePaymentRepository().getLines(widget.invoiceId);
+    final inv = await InvoiceRepository().getById(widget.invoiceId);
+    return _SummaryData(lines, (inv?.isDraft ?? 0) == 1);
+  }
+
+  Future<void> _addForRemainder(double unsettled) async {
+    final line = await showPaymentLineDialog(context, remaining: unsettled, currency: widget.currency);
+    if (line == null || !mounted) return;
+    try {
+      await InvoicePaymentRepository().addPayment(invoiceId: widget.invoiceId, line: line);
+      if (!mounted) return;
+      setState(() => _future = _load());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(financeErrorText(e))));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<PaymentLine>>(
+    return FutureBuilder<_SummaryData>(
       future: _future,
       builder: (context, snap) {
-        final lines = snap.data;
-        if (lines == null || lines.isEmpty) return const SizedBox.shrink();
+        final data = snap.data;
+        if (data == null || data.lines.isEmpty) return const SizedBox.shrink();
+        final lines = data.lines;
         final cur = widget.currency;
         final paid = lines.where((l) => l.isPaid).fold(0.0, (s, l) => s + l.amount);
         final pending = lines.where((l) => !l.isPaid).fold(0.0, (s, l) => s + l.amount);
@@ -264,6 +308,23 @@ class _PaymentLinesSummaryState extends State<PaymentLinesSummary> {
               _kv('دریافت‌شده', CurrencyFormatter.format(paid, cur), Colors.green.shade700),
               _kv('در انتظار (چک / توافقی)', CurrencyFormatter.format(pending, cur), Colors.orange.shade800),
               if (unsettled > 0.5) _kv('مانده‌ی تسویه‌نشده', CurrencyFormatter.format(unsettled, cur), Colors.red),
+              if (unsettled > 0.5 && !data.isDraft)
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('ثبت پرداخت برای مانده'),
+                    onPressed: () => _addForRemainder(unsettled),
+                  ),
+                ),
+              if (pending > 0.5)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'ثبت پرداختِ چک یا پرداخت توافقی از کادر «یادآوری پرداخت‌ها» (بالای صفحه‌ی رسید) انجام می‌شود.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ),
             ]),
           ),
         );
