@@ -1,4 +1,5 @@
 import '../models/invoice.dart';
+import '../repositories/invoice_payment_repository.dart';
 import '../repositories/invoice_repository.dart';
 
 class InvoiceCartLine {
@@ -44,6 +45,7 @@ class InvoiceService {
   /// خودکار یا یکی از شماره‌های آزادشده‌ی همین نوع مجاز است). اگر خالی باشد،
   /// شماره‌ی بعدی خودکار گرفته می‌شود. تکراری نبودن شماره داخل تراکنش
   /// createInvoice هم دوباره بررسی می‌شود.
+  /// [paymentLines]: ردیف‌های «پرداخت ترکیبی» (فقط وقتی paymentType = combined).
   Future<int> issueInvoice({
     required InvoiceType type,
     int? customerId,
@@ -58,6 +60,7 @@ class InvoiceService {
     bool financePay = false,
     int? mileageKm,
     String? manualInvoiceNumber,
+    List<PaymentLine> paymentLines = const [],
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -79,6 +82,11 @@ class InvoiceService {
     final itemsTotal = lines.fold(0.0, (s, l) => s + l.total);
     final sideCostsTotal = sideCosts.fold(0.0, (s, c) => s + c.amount);
     final finalAmount = itemsTotal + sideCostsTotal;
+
+    if (paymentType == PaymentType.combined) {
+      final err = PaymentLine.validate(paymentLines, finalAmount);
+      if (err != null) throw StateError(err);
+    }
 
     final invoice = Invoice(
       invoiceNumber: invoiceNumber,
@@ -119,6 +127,7 @@ class InvoiceService {
       items: items,
       sideCosts: sideCostModels,
       financePay: financePay,
+      paymentLines: paymentType == PaymentType.combined ? paymentLines : const [],
     );
   }
 
@@ -137,6 +146,7 @@ class InvoiceService {
     String? checkDueDate,
     bool financePay = false,
     int? mileageKm,
+    List<PaymentLine> paymentLines = const [],
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -186,13 +196,15 @@ class InvoiceService {
       sideCosts: sideCostModels,
       isDraft: true,
       financePay: financePay,
+      paymentLines: paymentType == PaymentType.combined ? paymentLines : const [],
     );
   }
 
   /// ویرایش کامل یک پیش‌فاکتور موجود. فقط روی رکوردی با is_draft = 1 کار
   /// می‌کند؛ در غیر این صورت استثنا پرتاب می‌شود. شماره‌ی پیش‌فاکتور با
   /// ویرایش تغییر نمی‌کند. اگر [financePay] داده شود، تیک پرداخت از حساب
-  /// فروش کالا هم به‌روز می‌شود.
+  /// فروش کالا هم به‌روز می‌شود. [paymentLines] = null یعنی ردیف‌های پرداخت
+  /// ترکیبیِ ذخیره‌شده دست‌نخورده بمانند.
   Future<void> updateDraftInvoice({
     required int invoiceId,
     required InvoiceType type,
@@ -207,6 +219,7 @@ class InvoiceService {
     String? checkDueDate,
     bool? financePay,
     int? mileageKm,
+    List<PaymentLine>? paymentLines,
   }) async {
     if (lines.isEmpty) {
       throw ArgumentError('حداقل یک ردیف باید اضافه شود');
@@ -214,6 +227,11 @@ class InvoiceService {
     final itemsTotal = lines.fold(0.0, (s, l) => s + l.total);
     final sideCostsTotal = sideCosts.fold(0.0, (s, c) => s + c.amount);
     final finalAmount = itemsTotal + sideCostsTotal;
+
+    if (paymentType == PaymentType.combined && paymentLines != null) {
+      final err = PaymentLine.validate(paymentLines, finalAmount);
+      if (err != null) throw StateError(err);
+    }
 
     // invoiceNumber اینجا با پیش‌فاکتور فعلی جایگزین می‌شود (در Repository)،
     // پس مقدار موقت زیر صرفاً برای ساخت آبجکت Invoice لازم است و در
@@ -258,6 +276,7 @@ class InvoiceService {
       items: items,
       sideCosts: sideCostModels,
       financePay: financePay,
+      paymentLines: paymentType == PaymentType.combined ? paymentLines : const [],
     );
   }
 
