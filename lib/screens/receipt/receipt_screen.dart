@@ -18,6 +18,8 @@ import '../../repositories/settings_repository.dart';
 import '../../repositories/finance_repository.dart';
 import '../../repositories/invoice_visit_repository.dart';
 import '../reminders/cheque_reminders.dart';
+import '../../repositories/invoice_payment_repository.dart';
+import 'payment_lines_editor.dart';
 import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
@@ -50,6 +52,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   final _notesCtrl = TextEditingController();
   final _kmCtrl = TextEditingController();
   final _visitRepo = InvoiceVisitRepository();
+  List<PaymentLine> _payLines = [];
   String? _autoKm; // آخرین کیلومتری که خودکار پر شده
 
   /// true یعنی عددِ داخل کادر را خود کاربر نوشته (نه پیش‌فرض خودکار).
@@ -519,6 +522,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       _showMsg('لطفاً حساب مقصد را انتخاب کنید');
       return false;
     }
+    if (_paymentType == PaymentType.combined) {
+      final err = PaymentLine.validate(_payLines, _finalAmount);
+      if (err != null) {
+        _showMsg(err);
+        return false;
+      }
+        }
     if (_paymentType == PaymentType.nonCash && _checkDueDate == null) {
       _showMsg('لطفاً تاریخ سررسید چک را مشخص کنید');
       return false;
@@ -645,7 +655,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     return customerId;
   }
 
-  void _resetFormAfterSave() {
+    void _resetFormAfterSave() {
+    _payLines = [];
     _kmCtrl.clear();
     _lines.clear();
     _sideCosts.clear();
@@ -673,6 +684,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           : null;
 
       final invoiceId = await _invoiceService.issueInvoice(
+        paymentLines: _paymentType == PaymentType.combined ? _payLines : const [],
         mileageKm: _parseKm(),
         financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         type: _type,
@@ -713,7 +725,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           ? _selectedVehicle!.id
           : null;
 
-      await _invoiceService.saveDraftInvoice(
+            await _invoiceService.saveDraftInvoice(
+        paymentLines: _paymentType == PaymentType.combined ? _payLines : const [],
         mileageKm: _parseKm(),
         financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         type: _type,
@@ -746,7 +759,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     return int.tryParse(t);
   }
 
-  void _clearDraft() {
+    void _clearDraft() {
+    _payLines = [];
     _kmCtrl.clear();
     setState(() {
       _lines.clear();
@@ -981,6 +995,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             decoration: const InputDecoration(labelText: 'شماره کارت و شبا'),
             items: _accounts.map((a) => DropdownMenuItem(value: a, child: Text('${a.title} - ${a.number}'))).toList(),
             onChanged: (a) => setState(() => _selectedAccount = a),
+          ),
+         if (_paymentType == PaymentType.combined)
+          PaymentLinesEditor(
+            lines: _payLines,
+            total: _finalAmount,
+            currency: _settings.currency,
+            onChanged: (v) => setState(() => _payLines = v),
           ),
         if (_paymentType == PaymentType.nonCash) ...[
           Container(
