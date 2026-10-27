@@ -137,6 +137,7 @@ class FinanceInvoicePosting {
     if (rows.isEmpty) return;
     final inv = rows.first;
     if ((inv['is_draft'] as int? ?? 0) == 1) return;
+    if (inv['payment_type'] == 'combined') return; // سهم هر پرداخت در InvoicePaymentRepository ثبت می‌شود
 
     final type = inv['type'] as String?;
     final isPurchase = type == 'productPurchase';
@@ -188,7 +189,69 @@ class FinanceInvoicePosting {
     await _postEntries(txn,
         accountId: account.id!, inv: inv, isSale: isSale, goods: goods, sides: sides, at: issuedAt);
   }
+  
+  /// سهم کالاییِ یک پرداخت واقعی از فاکتور «پرداخت ترکیبی». سهم تجمعی
+  /// = جمع پرداخت‌ها × (مبلغ کالا+جانبی ÷ مبلغ فاکتور)؛ فقط اختلافش با آنچه
+  /// قبلاً ثبت شده، در دفتر ثبت می‌شود.
+  static Future<void> postPaymentShare(
+    Transaction txn, {
+    required int invoiceId,
+    required double paidTotalAfter,
+    required DateTime at,
+    required String label,
+  }) async {
+    final rows = await txn.query('invoices', where: 'id = ?', whereArgs: [invoiceId], limit: 1);
+    if (rows.isEmpty) return;
+    final inv = rows.first;
+    if ((inv['is_draft'] as int? ?? 0) == 1) return;
+    final type = inv['type'] as String?;
+    final isPurchase = type == 'productPurchase';
+    final isServiceType = type == 'electrical' || type == 'mechanic' || type == 'suspension';
+    final isSale = type == 'productSale' || isServiceType;
+    if (!isSale && !isPurchase) return;
+    if (isPurchase && (inv['finance_pay'] as int? ?? 0) != 1) return;
 
+    final account = await _account(txn);
+    if (account == null || at.isBefore(account.startDateTime)) return;
+    final goods = await _goodsTotal(txn, invoiceId);
+    if (goods <= 0) return;
+    var ledgerTotal = goods;
+    if (!isServiceType) {
+      final sides = await txn.query('side_costs', where: 'invoice_id = ?', whereArgs: [invoiceId]);
+      for (final s in sides) {
+        ledgerTotal += (s['amount'] as num?)?.toDouble() ?? 0.0;
+      }
+    }
+    final finalAmount = (inv['final_amount'] as num?)?.toDouble() ?? 0.0;
+    if (finalAmount <= 0) return;
+
+    final txType = isSale ? FinanceTxType.saleReceipt : FinanceTxType.purchasePayment;
+    final target = paidTotalAfter >= finalAmount - 0.5
+        ? ledgerTotal
+        : (paidTotalAfter * ledgerTotal / finalAmount).roundToDouble();
+    final posted = await txn.rawQuery(
+        'SELECT SUM(amount) t FROM finance_transactions WHERE invoice_id = ? AND tx_type = ? AND reverses_id IS NULL',
+        [invoiceId, txType.key]);
+    final already = (posted.first['t'] as num?)?.toDouble() ?? 0.0;
+    final amount = target - already;
+    if (amount <= 0) return;
+
+    final number = (inv['invoice_number'] as String?) ?? '';
+    final counterparty = await _customerName(txn, inv['customer_id'] as int?);
+    await txn.insert(
+      'finance_transactions',
+      _txMap(
+        accountId: account.id!,
+        at: at,
+        type: txType,
+        amount: amount,
+        description: '${isSale ? 'دریافت وجه فاکتور' : 'پرداخت فاکتور خرید'} $number — $label',
+        invoiceId: invoiceId,
+        invoiceNumber: number,
+        counterparty: counterparty,
+      ),
+    );
+  }
   // ==================== چک‌ها ====================
 
   static Future<List<FinanceCheque>> listCheques({String? status}) async {
