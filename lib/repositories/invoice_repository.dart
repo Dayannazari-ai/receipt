@@ -167,6 +167,7 @@ class InvoiceRepository {
     required List<SideCost> sideCosts,
     bool isDraft = false,
     bool financePay = false,
+    List<PaymentLine> paymentLines = const [],
   }) async {
     final db = await _db.database;
     return db.transaction((txn) async {
@@ -193,7 +194,10 @@ class InvoiceRepository {
         await txn.insert('side_costs', cost.toMap()..remove('id')..['invoice_id'] = invoiceId);
       }
 
-            if (!isDraft) {
+      if (paymentLines.isNotEmpty) {
+        await InvoicePaymentRepository.saveLines(txn, invoiceId, paymentLines);
+      }
+      if (!isDraft) {
         await FinanceInvoicePosting.onInvoiceIssued(txn, invoiceId: invoiceId);
         await InvoicePaymentRepository.createForIssuedInvoice(txn, invoiceId: invoiceId);
       }
@@ -283,7 +287,8 @@ class InvoiceRepository {
     required Invoice invoice,
     required List<InvoiceItem> items,
     required List<SideCost> sideCosts,
-    bool? financePay,
+        bool? financePay,
+    List<PaymentLine>? paymentLines,
   }) async {
     final db = await _db.database;
     await db.transaction((txn) async {
@@ -304,6 +309,9 @@ class InvoiceRepository {
 
       await txn.delete('invoice_items', where: 'invoice_id = ?', whereArgs: [invoiceId]);
       for (final item in items) {
+      if (paymentLines != null) {
+        await InvoicePaymentRepository.saveLines(txn, invoiceId, paymentLines);
+              }
         await txn.insert('invoice_items', item.toMap()..remove('id')..['invoice_id'] = invoiceId);
       }
 
