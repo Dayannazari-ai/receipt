@@ -9,6 +9,7 @@ import '../../repositories/settings_repository.dart';
 import '../../services/cheque_notification_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
+import '../../utils/thousands_input_formatter.dart';
 import '../invoices/invoice_detail_screen.dart';
 
 String _statusText(int d) {
@@ -27,6 +28,15 @@ Color _statusColor(int d) {
 String _message(ChequeReminder c, int d) {
   final name = c.customerName.isEmpty ? 'بدون نام' : c.customerName;
   final date = PersianDateUtil.formatDateNumeric(c.dueDate.toIso8601String());
+  if (c.isPromise) {
+    if (d < 0) {
+      return 'پرداخت توافقی مشتری $name با سررسید $date هنوز دریافت نشده است. لطفاً برای پیگیری تماس بگیرید.';
+    }
+    if (d == 0) {
+      return 'امروز موعد پرداخت توافقی مشتری $name است. لطفاً برای پیگیری پرداخت اقدام کنید.';
+    }
+    return 'یادآوری: موعد پرداخت توافقی مشتری $name نزدیک است. لطفاً برای پیگیری با مشتری تماس بگیرید.';
+  }
   if (d < 0) {
     return 'چک مشتری $name با سررسید $date هنوز پرداخت نشده است. لطفاً برای پیگیری پرداخت تماس بگیرید.';
   }
@@ -46,14 +56,28 @@ Future<bool> _confirmAndMarkPaid(BuildContext context, ChequeReminder c, Currenc
   );
   if (jalali == null || !context.mounted) return false;
   final paidAt = jalali.toDateTime();
+  final what = c.isPromise ? 'پرداخت توافقی' : 'چک';
+  final amountCtrl = TextEditingController(text: c.amount.toStringAsFixed(0));
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('ثبت پرداخت چک'),
-      content: Text(
-          'چک فاکتور ${PersianDateUtil.toPersianDigits(c.invoiceNumber)} به مبلغ ${CurrencyFormatter.format(c.amount, currency)} '
-          'در تاریخ ${PersianDateUtil.formatDateNumeric(paidAt.toIso8601String())} پرداخت‌شده ثبت شود؟\n'
-          'فقط یادآوری همین چک برداشته می‌شود.'),
+      title: Text('ثبت پرداخت $what'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+            '$what فاکتور ${PersianDateUtil.toPersianDigits(c.invoiceNumber)} به مبلغ ${CurrencyFormatter.format(c.amount, currency)} '
+            'در تاریخ ${PersianDateUtil.formatDateNumeric(paidAt.toIso8601String())} پرداخت‌شده ثبت شود؟\n'
+            'فقط همین ردیف تغییر می‌کند.'),
+        if (c.isPromise) ...[
+          const SizedBox(height: 10),
+          TextField(
+            controller: amountCtrl,
+            decoration: InputDecoration(
+                labelText: 'مبلغ دریافت‌شده (کمتر از کل = پرداخت جزئی)', suffixText: currency.label),
+            keyboardType: TextInputType.number,
+            inputFormatters: [ThousandsInputFormatter()],
+          ),
+        ],
+      ]),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
         TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ثبت پرداخت')),
@@ -61,8 +85,19 @@ Future<bool> _confirmAndMarkPaid(BuildContext context, ChequeReminder c, Currenc
     ),
   );
   if (ok != true) return false;
+  double? partial;
+  if (c.isPromise) {
+    final a = double.tryParse(ThousandsInputFormatter.unformat(amountCtrl.text.trim()));
+    if (a == null || a <= 0 || a > c.amount) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مبلغ دریافت‌شده معتبر نیست')));
+      }
+      return false;
+    }
+    partial = a;
+  }
   try {
-    await InvoicePaymentRepository().markPaid(paymentId: c.paymentId, paidAt: paidAt);
+    await InvoicePaymentRepository().markPaid(paymentId: c.paymentId, paidAt: paidAt, amount: partial);
     return true;
   } catch (e) {
     if (context.mounted) {
@@ -107,7 +142,7 @@ class _ReminderTile extends StatelessWidget {
             Text(_message(item, d), style: const TextStyle(fontSize: 12)),
             const SizedBox(height: 4),
             Text(
-              'فاکتور ${PersianDateUtil.toPersianDigits(item.invoiceNumber)} • '
+              '${item.isPromise ? 'توافقی • ' : ''}فاکتور ${PersianDateUtil.toPersianDigits(item.invoiceNumber)} • '
               'سررسید ${PersianDateUtil.formatDateNumeric(item.dueDate.toIso8601String())} • '
               '${CurrencyFormatter.format(item.amount, currency)}',
               style: const TextStyle(fontSize: 12, color: Colors.grey),
@@ -212,7 +247,7 @@ class _ChequeRemindersCardState extends State<ChequeRemindersCard> with WidgetsB
           Icon(Icons.notifications_active_outlined, color: accent),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('یادآوری چک‌ها (${PersianDateUtil.toPersianDigits('${due.length}')})',
+            child: Text('یادآوری پرداخت‌ها (${PersianDateUtil.toPersianDigits('${due.length}')})',
                 style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
         ]),
@@ -234,7 +269,7 @@ class _ChequeRemindersCardState extends State<ChequeRemindersCard> with WidgetsB
         if (_items.length > shown.length)
           TextButton(
             onPressed: _openAll,
-            child: Text('مشاهده‌ی همه‌ی چک‌های پیگیری‌نشده (${PersianDateUtil.toPersianDigits('${_items.length}')})'),
+            child: Text('مشاهده‌ی همه‌ی پرداخت‌ها و چک‌های پیگیری‌نشده (${PersianDateUtil.toPersianDigits('${_items.length}')})'),
           ),
       ]),
     );
@@ -279,7 +314,7 @@ class _ChequeRemindersScreenState extends State<ChequeRemindersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('چک‌های پیگیری‌نشده')),
+      appBar: AppBar(title: const Text('پرداخت‌ها و چک‌های پیگیری‌نشده')),
       body: RefreshIndicator(
         onRefresh: _load,
         child: _loading
@@ -287,7 +322,7 @@ class _ChequeRemindersScreenState extends State<ChequeRemindersScreen> {
             : _items.isEmpty
                 ? ListView(children: const [
                     SizedBox(height: 200),
-                    Center(child: Text('چک پیگیری‌نشده‌ای وجود ندارد')),
+                    Center(child: Text('پرداخت یا چک پیگیری‌نشده‌ای وجود ندارد')),
                   ])
                 : ListView(
                     padding: const EdgeInsets.all(12),
