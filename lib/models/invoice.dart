@@ -25,7 +25,7 @@ extension InvoiceTypeX on InvoiceType {
       InvoiceType.values.firstWhere((e) => e.name == v, orElse: () => InvoiceType.electrical);
 }
 
-enum PaymentType { cash, nonCash, cardToCard, onlinePayment, bankTransfer }
+enum PaymentType { cash, nonCash, cardToCard, onlinePayment, bankTransfer, combined }
 
 extension PaymentTypeX on PaymentType {
   String get label {
@@ -40,6 +40,8 @@ extension PaymentTypeX on PaymentType {
         return 'کارت‌خوان مغازه';
       case PaymentType.bankTransfer:
         return 'انتقال بانکی';
+      case PaymentType.combined:
+        return 'پرداخت ترکیبی';
     }
   }
 
