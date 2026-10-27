@@ -42,6 +42,9 @@ dependencies:
   speech_to_text: ^7.0.0
   # مجوز «دسترسی به همه‌ی فایل‌ها» برای پشتیبان خودکار در حافظه‌ی داخلی
   permission_handler: ^12.0.1
+    # اعلان‌های زمان‌بندی‌شده‌ی یادآوری چک (اندروید)
+  flutter_local_notifications: 18.0.1
+  timezone: ^0.9.4
 
 dev_dependencies:
   flutter_test:
