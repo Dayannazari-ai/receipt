@@ -6,10 +6,12 @@ import 'services/auth_service.dart';
 import 'utils/app_theme.dart';
 import 'screens/home_shell.dart';
 import 'screens/lock_screen.dart';
+import 'services/cheque_notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SeedService().seedIfEmpty();
+  await ChequeNotificationService.init();
   final settings = await SettingsRepository().getSettings();
   runApp(ReceiptApp(primaryColorHex: settings.primaryColorHex));
 }
@@ -42,6 +44,7 @@ class _ReceiptAppState extends State<ReceiptApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'رسید و فاکتور',
+      navigatorKey: ChequeNotificationService.navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeFrom(AppTheme.hexToColor(_colorHex)),
       locale: const Locale('fa', 'IR'),
@@ -100,9 +103,13 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     if (_locked == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    if (_locked == true) {
+        if (_locked == true) {
+      ChequeNotificationService.appUnlocked = false;
       return LockScreen(onUnlocked: () => setState(() => _locked = false));
     }
+    ChequeNotificationService.appUnlocked = true;
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => ChequeNotificationService.openPendingIfPossible());
     return const HomeShell();
   }
 }
