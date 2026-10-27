@@ -27,6 +27,8 @@ import '../vehicles/vehicle_picker_sheet.dart';
 import '../voice_search_sheet.dart';
 import '../products/product_form_screen.dart';
 import '../receipt/quick_add_customer_dialog.dart';
+import '../../repositories/invoice_payment_repository.dart';
+import '../receipt/payment_lines_editor.dart';
 
 /// صفحه‌ی مستقل ویرایش یک «پیش‌فاکتور» موجود. کاملاً جدا از receipt_screen.dart
 /// است تا منطق صدور فاکتور اصلی هرگز درگیر این قابلیت نشود.
@@ -61,6 +63,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
   final _mobileCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _kmCtrl = TextEditingController();
+  List<PaymentLine> _payLines = [];
 
   late InvoiceType _type;
   late PaymentType _paymentType;
@@ -136,6 +139,9 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
     final accounts = await _paymentRepo.getAll();
     final hasFinance = await FinanceRepository().getGoodsSalesAccount() != null;
     final financePay = await InvoiceRepository().getFinancePay(widget.invoice.id!);
+    final payLines = widget.invoice.paymentType == PaymentType.combined
+        ? await InvoicePaymentRepository().getLines(widget.invoice.id!)
+        : <PaymentLine>[];
     if (widget.invoice.customerId != null) {
       final customer = await _customerRepo.getById(widget.invoice.customerId!);
       if (customer != null) {
@@ -159,6 +165,7 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
       _accounts = accounts;
       _hasFinanceAccount = hasFinance;
       _financePay = financePay;
+      _payLines = payLines;
       _selectedAccount = selectedAccount;
       _selectedVehicle = vehicle;
       _selectedVehicleLabel = vehicleLabel;
@@ -501,6 +508,13 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
       _showMsg('لطفاً حساب مقصد را انتخاب کنید');
       return;
     }
+        if (_paymentType == PaymentType.combined) {
+      final err = PaymentLine.validate(_payLines, _finalAmount);
+      if (err != null) {
+        _showMsg(err);
+        return;
+      }
+    }
     if (_paymentType == PaymentType.nonCash && _checkDueDate == null) {
       _showMsg('لطفاً تاریخ سررسید چک را مشخص کنید');
       return;
@@ -525,7 +539,8 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
           ? _selectedVehicle!.id
           : null;
 
-      await _invoiceService.updateDraftInvoice(
+        await _invoiceService.updateDraftInvoice(
+        paymentLines: _paymentType == PaymentType.combined ? _payLines : const [],
         mileageKm: _parseKm(),
         financePay: _type.isProductPurchase && _hasFinanceAccount && _financePay,
         invoiceId: widget.invoice.id!,
@@ -735,6 +750,13 @@ class _EditDraftInvoiceScreenState extends State<EditDraftInvoiceScreen> {
             decoration: const InputDecoration(labelText: 'شماره کارت و شبا'),
             items: _accounts.map((a) => DropdownMenuItem(value: a, child: Text('${a.title} - ${a.number}'))).toList(),
             onChanged: (a) => setState(() => _selectedAccount = a),
+          ),
+                if (_paymentType == PaymentType.combined)
+          PaymentLinesEditor(
+            lines: _payLines,
+            total: _finalAmount,
+            currency: _settings.currency,
+            onChanged: (v) => setState(() => _payLines = v),
           ),
         if (_paymentType == PaymentType.nonCash) ...[
           Container(
