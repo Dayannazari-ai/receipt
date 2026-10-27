@@ -229,6 +229,60 @@ class InvoicePaymentRepository {
     }
   }
 
+  /// ثبت یک پرداخت تازه برای مانده‌ی تسویه‌نشده‌ی فاکتور «پرداخت ترکیبی»ِ
+  /// صادرشده. روش‌های آنی همان لحظه دریافت‌شده حساب و سهم کالاییشان وارد
+  /// حساب می‌شود؛ چک و پرداخت توافقی «در انتظار» می‌مانند. جمع ردیف‌ها نباید
+  /// از مبلغ فاکتور بیشتر شود.
+  Future<void> addPayment({required int invoiceId, required PaymentLine line}) async {
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      final rows = await txn.query('invoices', where: 'id = ?', whereArgs: [invoiceId], limit: 1);
+      if (rows.isEmpty) throw StateError('فاکتور یافت نشد');
+      final inv = rows.first;
+      if (inv['payment_type'] != 'combined') throw StateError('این کار فقط برای فاکتور پرداخت ترکیبی ممکن است');
+      if ((inv['is_draft'] as int? ?? 0) == 1) {
+        throw StateError('پرداخت‌های پیش‌فاکتور را از صفحه‌ی ویرایش پیش‌فاکتور تغییر دهید');
+      }
+      if ((inv['is_deleted'] as int? ?? 0) == 1) throw StateError('این فاکتور باطل شده است');
+      final finalAmount = (inv['final_amount'] as num?)?.toDouble() ?? 0.0;
+
+      if (line.amount.isNaN || line.amount <= 0) throw StateError('مبلغ باید بیشتر از صفر باشد');
+      if (PaymentMethods.needsDueDate(line.method) && line.date == null) {
+        throw StateError('برای چک و پرداخت توافقی، تاریخ سررسید لازم است');
+      }
+      final sumRows = await txn.rawQuery(
+          'SELECT SUM(amount) t FROM invoice_payments WHERE invoice_id = ?', [invoiceId]);
+      final existing = (sumRows.first['t'] as num?)?.toDouble() ?? 0.0;
+      if (existing + line.amount > finalAmount + 0.5) {
+        throw StateError('مبلغ از مانده‌ی تسویه‌نشده‌ی فاکتور بیشتر است');
+      }
+
+      final immediate = PaymentMethods.immediate.contains(line.method);
+      final paidAt = line.date ?? DateTime.now();
+      await txn.insert('invoice_payments', {
+        'invoice_id': invoiceId,
+        'method': line.method,
+        'amount': line.amount,
+        'due_date': line.date == null ? null : _dateIso(line.date!),
+        'status': immediate ? statusPaid : statusPending,
+        'paid_date': immediate ? paidAt.toIso8601String() : null,
+        'notes': line.notes.trim().isEmpty ? null : line.notes.trim(),
+        'backup_uid': _newUid(),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      if (immediate) {
+        final paid = await txn.rawQuery(
+            'SELECT SUM(amount) t FROM invoice_payments WHERE invoice_id = ? AND status = ?',
+            [invoiceId, statusPaid]);
+        await FinanceInvoicePosting.postPaymentShare(txn,
+            invoiceId: invoiceId,
+            paidTotalAfter: (paid.first['t'] as num?)?.toDouble() ?? 0.0,
+            at: paidAt,
+            label: PaymentMethods.label(line.method));
+      }
+    });
+  }
+
   // ==================== یادآوری و ثبت پرداخت ====================
 
   /// همه‌ی چک‌ها و پرداخت‌های توافقیِ پرداخت‌نشده‌ی فاکتورهای اصلیِ
