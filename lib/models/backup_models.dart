@@ -77,7 +77,7 @@ class BackupEnvelope {
   /// نسخه ۳: افزوده شدن حساب مالی فروش کالا و تراکنش‌های آن (فقط در Backup
   /// کامل). فایل‌های نسخه ۱ و ۲ همچنان خوانده می‌شوند؛ چون بخش مالی ندارند،
   /// بازیابی آن‌ها دفتر مالی فعلی را لمس نمی‌کند.
-  static const int currentVersion = 4;
+  static const int currentVersion = 5;
 
   final BackupType backupType;
   final int backupVersion;
