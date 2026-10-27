@@ -154,10 +154,14 @@ class ChequeNotificationService {
     final date = PersianDateUtil.formatDateNumeric(c.dueDate.toIso8601String());
     final info =
         'فاکتور ${PersianDateUtil.toPersianDigits(c.invoiceNumber)} — ${CurrencyFormatter.format(c.amount, currency)}';
-    final dueBody =
-        'آقای/خانم $name، موعد پرداخت یا سررسید چک شما در تاریخ $date می‌باشد. جهت یادآوری و پیگیری پرداخت.\n$info';
-    final overdueBody =
-        'چک $name با سررسید $date هنوز پرداخت نشده است. برای پیگیری پرداخت با مشتری تماس بگیرید.\n$info';
+    final promise = c.isPromise;
+    final what = promise ? 'پرداخت' : 'چک';
+    final dueBody = promise
+        ? 'آقای/خانم $name، موعد پرداخت توافقی شما در تاریخ $date می‌باشد. جهت یادآوری و پیگیری پرداخت.\n$info'
+        : 'آقای/خانم $name، موعد پرداخت یا سررسید چک شما در تاریخ $date می‌باشد. جهت یادآوری و پیگیری پرداخت.\n$info';
+    final overdueBody = promise
+        ? 'پرداخت توافقی $name با سررسید $date هنوز دریافت نشده است. برای پیگیری با مشتری تماس بگیرید.\n$info'
+        : 'چک $name با سررسید $date هنوز پرداخت نشده است. برای پیگیری پرداخت با مشتری تماس بگیرید.\n$info';
 
     DateTime at(int dayOffset) =>
         DateTime(c.dueDate.year, c.dueDate.month, c.dueDate.day + dayOffset, notifyHour);
@@ -167,13 +171,13 @@ class ChequeNotificationService {
     final out = <_Planned>[];
 
     if (at(-2).isAfter(margin)) {
-      out.add(_Planned(base, 'یادآوری چک: ۲ روز تا سررسید', dueBody, at(-2), false, c.invoiceId));
+      out.add(_Planned(base, 'یادآوری $what: ۲ روز تا سررسید', dueBody, at(-2), false, c.invoiceId));
     }
     if (at(-1).isAfter(margin)) {
-      out.add(_Planned(base + 1, 'یادآوری چک: فردا سررسید', dueBody, at(-1), false, c.invoiceId));
+      out.add(_Planned(base + 1, 'یادآوری $what: فردا سررسید', dueBody, at(-1), false, c.invoiceId));
     }
     if (at(0).isAfter(margin)) {
-      out.add(_Planned(base + 2, 'سررسید چک امروز است', dueBody, at(0), false, c.invoiceId));
+      out.add(_Planned(base + 2, 'سررسید $what امروز است', dueBody, at(0), false, c.invoiceId));
     }
 
     // از روز بعد از سررسید هر روز تا پرداخت. اگر سررسید گذشته، از نزدیک‌ترین
@@ -183,7 +187,7 @@ class ChequeNotificationService {
     final next9 =
         today9.isAfter(margin) ? today9 : DateTime(now.year, now.month, now.day + 1, notifyHour);
     if (start.isBefore(next9)) start = next9;
-    out.add(_Planned(base + 3, 'چک سررسیدگذشته پرداخت نشده', overdueBody, start, true, c.invoiceId));
+    out.add(_Planned(base + 3, promise ? 'پرداخت توافقی سررسیدگذشته' : 'چک سررسیدگذشته پرداخت نشده', overdueBody, start, true, c.invoiceId));
     return out;
   }
 
