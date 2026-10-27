@@ -16,6 +16,7 @@ import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../../utils/thousands_input_formatter.dart';
 import 'edit_draft_invoice_screen.dart';
+import '../receipt/payment_lines_editor.dart';
 import '../../repositories/invoice_void_repository.dart';
 
 class InvoiceDetailScreen extends StatefulWidget {
@@ -251,6 +252,10 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           ),
         ),
         const SizedBox(height: 16),
+         if (inv.paymentType == PaymentType.combined) ...[
+          PaymentLinesSummary(invoiceId: inv.id!, finalAmount: inv.finalAmount, currency: _settings.currency),
+          const SizedBox(height: 16),
+        ],
         const Text('اقلام فاکتور', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(height: 8),
         ..._items.map((it) => Card(
