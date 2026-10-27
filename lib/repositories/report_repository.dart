@@ -76,11 +76,14 @@ class ReportRepository {
     final db = await _db.database;
     final rows = await db.rawQuery(
       'SELECT i.type AS type, COUNT(DISTINCT i.id) AS c, SUM(it.total) AS t, '
-      'SUM(CASE WHEN i.payment_type = ? THEN it.total ELSE 0 END) AS nc '
+            "SUM(CASE WHEN i.payment_type = 'nonCash' THEN it.total "
+      "WHEN i.payment_type = 'combined' AND i.final_amount > 0 THEN it.total * COALESCE("
+      "(SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.id AND p.status = 'pending'), 0) "
+      "/ i.final_amount ELSE 0 END) AS nc "
       'FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id '
       'WHERE it.item_type = ? AND i.is_deleted = 0 AND i.is_draft = 0 '
       'AND i.issue_date BETWEEN ? AND ? GROUP BY i.type',
-      ['nonCash', 'service', from.toIso8601String(), to.toIso8601String()],
+         ['service', from.toIso8601String(), to.toIso8601String()],
     );
     return rows
         .map((r) => ServiceIncomeRow(
