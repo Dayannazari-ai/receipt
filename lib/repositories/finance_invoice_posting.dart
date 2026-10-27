@@ -242,6 +242,12 @@ class FinanceInvoicePosting {
         where: 'id = ?',
         whereArgs: [chequeId],
       );
+            await txn.update(
+        'invoice_payments',
+        {'status': 'paid', 'paid_date': collectedAt.toIso8601String()},
+        where: "invoice_id = ? AND method = 'cheque' AND status = 'pending'",
+        whereArgs: [cheque.invoiceId],
+      );
       return firstId;
     });
   }
