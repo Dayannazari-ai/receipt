@@ -52,7 +52,7 @@ jobs:
           grep -q 'requestLegacyExternalStorage' "$MANIFEST" || sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' "$MANIFEST"
           echo "---- manifest storage lines ----"
           grep -E 'EXTERNAL_STORAGE|requestLegacy' "$MANIFEST"
-              - name: Add notification permissions and receivers
+      - name: Add notification permissions and receivers
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           grep -q 'POST_NOTIFICATIONS' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
