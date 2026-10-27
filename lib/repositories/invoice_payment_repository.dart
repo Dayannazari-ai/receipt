@@ -3,7 +3,86 @@ import '../database/database_helper.dart';
 import 'finance_invoice_posting.dart';
 import 'finance_repository.dart';
 
-/// یک چکِ پرداخت‌نشده‌ی فاکتور (برای یادآوری).
+/// روش‌های پرداخت یک ردیف (invoice_payments.method).
+class PaymentMethods {
+  PaymentMethods._();
+  static const String cash = 'cash';
+  static const String card = 'card';
+  static const String bankTransfer = 'bank_transfer';
+  static const String cardToCard = 'card_to_card';
+  static const String cheque = 'cheque';
+  static const String promise = 'promise';
+
+  /// روش‌هایی که همان لحظه پرداخت‌شده حساب می‌شوند.
+  static const Set<String> immediate = {cash, card, bankTransfer, cardToCard};
+
+  static const Map<String, String> labels = {
+    cash: 'نقدی',
+    card: 'کارت‌خوان',
+    bankTransfer: 'انتقال بانکی',
+    cardToCard: 'کارت به کارت',
+    cheque: 'چک',
+    promise: 'پرداخت توافقی',
+  };
+
+  static String label(String m) => labels[m] ?? m;
+  static bool needsDueDate(String m) => m == cheque || m == promise;
+}
+
+/// یک ردیف پرداخت (هم برای فرم، هم برای خواندن از دیتابیس).
+class PaymentLine {
+  final int? id;
+  String method;
+  double amount;
+
+  /// تاریخ پرداخت (روش‌های آنی) یا سررسید (چک و پرداخت توافقی).
+  DateTime? date;
+  String notes;
+  String status; // 'pending' | 'paid'
+  DateTime? paidDate;
+
+  PaymentLine({
+    this.id,
+    required this.method,
+    required this.amount,
+    this.date,
+    this.notes = '',
+    this.status = 'pending',
+    this.paidDate,
+  });
+
+  bool get isPaid => status == 'paid';
+
+  factory PaymentLine.fromRow(Map<String, Object?> r) => PaymentLine(
+        id: (r['id'] as num?)?.toInt(),
+        method: (r['method'] as String?) ?? PaymentMethods.cash,
+        amount: (r['amount'] as num?)?.toDouble() ?? 0.0,
+        date: DateTime.tryParse((r['due_date'] as String?) ?? ''),
+        notes: (r['notes'] as String?) ?? '',
+        status: (r['status'] as String?) ?? 'pending',
+        paidDate: DateTime.tryParse((r['paid_date'] as String?) ?? ''),
+      );
+
+  /// null = معتبر. مجموع ردیف‌ها نباید از مبلغ فاکتور بیشتر باشد؛ کمتر بودن
+  /// مجاز است و اختلاف «مانده‌ی تسویه‌نشده» نمایش داده می‌شود.
+  static String? validate(List<PaymentLine> lines, double total) {
+    if (lines.isEmpty) return 'برای پرداخت ترکیبی حداقل یک ردیف پرداخت اضافه کنید';
+    var sum = 0.0;
+    for (final l in lines) {
+      if (l.amount.isNaN || l.amount.isInfinite || l.amount <= 0) {
+        return 'مبلغ هر ردیف پرداخت باید بیشتر از صفر باشد';
+      }
+      if (PaymentMethods.needsDueDate(l.method) && l.date == null) {
+        return 'برای چک و پرداخت توافقی، تاریخ سررسید را مشخص کنید';
+      }
+      sum += l.amount;
+    }
+    if (sum > total + 0.5) return 'مجموع پرداخت‌ها از مبلغ فاکتور بیشتر است';
+    return null;
+  }
+}
+
+/// یک چک یا پرداخت توافقیِ پرداخت‌نشده (برای یادآوری).
 class ChequeReminder {
   final int paymentId;
   final int invoiceId;
@@ -11,6 +90,7 @@ class ChequeReminder {
   final String customerName;
   final double amount;
   final DateTime dueDate;
+  final String method; // 'cheque' | 'promise'
 
   const ChequeReminder({
     required this.paymentId,
@@ -19,7 +99,10 @@ class ChequeReminder {
     required this.customerName,
     required this.amount,
     required this.dueDate,
+    this.method = PaymentMethods.cheque,
   });
+
+  bool get isPromise => method == PaymentMethods.promise;
 
   /// تعداد روز تا سررسید (اختلاف تقویمی)؛ ۰ = امروز، منفی = گذشته.
   int daysLeft(DateTime now) {
@@ -29,24 +112,66 @@ class ChequeReminder {
   }
 }
 
-/// پرداخت‌ها/چک‌های هر فاکتور (جدول invoice_payments، دیتابیس نسخه ۱۱).
-/// هر چک یک ردیف مستقل دارد؛ پرداخت یک چک ردیف چک دیگر را تغییر نمی‌دهد.
-/// فاکتورهای قبل از نسخه ۱۱ ردیف ندارند و پیگیری نمی‌شوند (تصمیم کاربر).
+/// پرداخت‌ها/چک‌های هر فاکتور (جدول invoice_payments).
+/// - فاکتور «چکی» (قدیمی): یک ردیف cheque به مبلغ کل فاکتور.
+/// - فاکتور «پرداخت ترکیبی»: هر ردیف مستقل؛ روش‌های آنی همان لحظه‌ی صدور
+///   پرداخت‌شده و وارد حساب می‌شوند، چک و پرداخت توافقی تا پرداخت واقعی نه.
+/// سهم کالاییِ هر پرداخت واقعی (به نسبت مبلغ) در حساب فروش کالا ثبت می‌شود.
 class InvoicePaymentRepository {
-  static const String methodCheque = 'cheque';
+  static const String methodCheque = PaymentMethods.cheque;
   static const String statusPending = 'pending';
   static const String statusPaid = 'paid';
 
   final _db = DatabaseHelper.instance;
 
-  /// بعد از صدور فاکتور اصلی (یا تبدیل پیش‌فاکتور) داخل همان تراکنش صدا زده
-  /// می‌شود. فقط برای فاکتور «چکی» با تاریخ سررسید ردیف می‌سازد.
+  static String _newUid() => FinanceRepository.generateUid().replaceFirst('fin-', 'ipay-');
+
+  static String _dateIso(DateTime d) => DateTime(d.year, d.month, d.day).toIso8601String();
+
+  // ==================== ردیف‌های فاکتور ====================
+
+  /// جایگزینی کامل ردیف‌های یک فاکتور (فقط هنگام ساخت یا ویرایش پیش‌فاکتور؛
+  /// همه به‌صورت «در انتظار» ذخیره می‌شوند و اثر مالی ندارند).
+  static Future<void> saveLines(Transaction txn, int invoiceId, List<PaymentLine> lines) async {
+    await txn.delete('invoice_payments', where: 'invoice_id = ?', whereArgs: [invoiceId]);
+    for (final l in lines) {
+      await txn.insert('invoice_payments', {
+        'invoice_id': invoiceId,
+        'method': l.method,
+        'amount': l.amount,
+        'due_date': l.date == null ? null : _dateIso(l.date!),
+        'status': statusPending,
+        'paid_date': null,
+        'notes': l.notes.trim().isEmpty ? null : l.notes.trim(),
+        'backup_uid': _newUid(),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    }
+  }
+
+  Future<List<PaymentLine>> getLines(int invoiceId) async {
+    final db = await _db.database;
+    final rows = await db.query('invoice_payments',
+        where: 'invoice_id = ?', whereArgs: [invoiceId], orderBy: 'id ASC');
+    return rows.map(PaymentLine.fromRow).toList();
+  }
+
+  // ==================== بعد از صدور فاکتور ====================
+
+  /// بعد از صدور فاکتور اصلی (یا تبدیل پیش‌فاکتور) داخل همان تراکنش صدا
+  /// زده می‌شود.
   static Future<void> createForIssuedInvoice(Transaction txn, {required int invoiceId}) async {
     final rows = await txn.query('invoices', where: 'id = ?', whereArgs: [invoiceId], limit: 1);
     if (rows.isEmpty) return;
     final inv = rows.first;
     if ((inv['is_draft'] as int? ?? 0) == 1) return;
-    if (inv['payment_type'] != 'nonCash') return;
+
+    final pt = inv['payment_type'];
+    if (pt == 'combined') {
+      await _processCombined(txn, inv);
+      return;
+    }
+    if (pt != 'nonCash') return;
     final due = (inv['check_due_date'] as String?)?.trim() ?? '';
     if (due.isEmpty) return;
     final dup = await txn.query('invoice_payments',
@@ -60,23 +185,65 @@ class InvoicePaymentRepository {
       'status': statusPending,
       'paid_date': null,
       'notes': null,
-      'backup_uid': FinanceRepository.generateUid().replaceFirst('fin-', 'ipay-'),
+      'backup_uid': _newUid(),
       'created_at': DateTime.now().toIso8601String(),
     });
   }
 
-  /// همه‌ی چک‌های پرداخت‌نشده‌ی فاکتورهای اصلیِ باطل‌نشده، به ترتیب سررسید.
+  /// فاکتور ترکیبی: ردیف‌های آنی پرداخت‌شده می‌شوند و سهم کالاییشان وارد
+  /// حساب می‌شود؛ چک و پرداخت توافقی «در انتظار» می‌مانند.
+  static Future<void> _processCombined(Transaction txn, Map<String, Object?> inv) async {
+    final invoiceId = (inv['id'] as num).toInt();
+    final finalAmount = (inv['final_amount'] as num?)?.toDouble() ?? 0.0;
+    final lines = await txn.query('invoice_payments',
+        where: 'invoice_id = ?', whereArgs: [invoiceId], orderBy: 'id ASC');
+    if (lines.isEmpty) throw StateError('برای پرداخت ترکیبی حداقل یک ردیف پرداخت لازم است');
+
+    var sum = 0.0;
+    var paidSoFar = 0.0;
+    for (final l in lines) {
+      final a = (l['amount'] as num?)?.toDouble() ?? 0.0;
+      sum += a;
+      if (l['status'] == statusPaid) paidSoFar += a;
+    }
+    if (sum > finalAmount + 0.5) {
+      throw StateError('مجموع پرداخت‌ها از مبلغ فاکتور بیشتر است؛ ردیف‌های پرداخت را اصلاح کنید');
+    }
+
+    final issuedAt = DateTime.tryParse((inv['issue_date'] as String?) ?? '') ?? DateTime.now();
+    for (final l in lines) {
+      if (l['status'] == statusPaid) continue;
+      final method = (l['method'] as String?) ?? PaymentMethods.cash;
+      if (!PaymentMethods.immediate.contains(method)) continue;
+      final amount = (l['amount'] as num?)?.toDouble() ?? 0.0;
+      final paidAt = DateTime.tryParse((l['due_date'] as String?) ?? '') ?? issuedAt;
+      paidSoFar += amount;
+      await txn.update(
+        'invoice_payments',
+        {'status': statusPaid, 'paid_date': paidAt.toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [l['id']],
+      );
+      await FinanceInvoicePosting.postPaymentShare(txn,
+          invoiceId: invoiceId, paidTotalAfter: paidSoFar, at: paidAt, label: PaymentMethods.label(method));
+    }
+  }
+
+  // ==================== یادآوری و ثبت پرداخت ====================
+
+  /// همه‌ی چک‌ها و پرداخت‌های توافقیِ پرداخت‌نشده‌ی فاکتورهای اصلیِ
+  /// باطل‌نشده، به ترتیب سررسید.
   Future<List<ChequeReminder>> pendingCheques() async {
     final db = await _db.database;
     final rows = await db.rawQuery(
       'SELECT p.id AS payment_id, p.invoice_id AS invoice_id, p.amount AS amount, p.due_date AS due_date, '
-      'i.invoice_number AS invoice_number, c.name AS customer_name '
+      'p.method AS method, i.invoice_number AS invoice_number, c.name AS customer_name '
       'FROM invoice_payments p '
       'JOIN invoices i ON i.id = p.invoice_id '
       'LEFT JOIN customers c ON c.id = i.customer_id '
-      'WHERE p.method = ? AND p.status = ? AND i.is_deleted = 0 AND i.is_draft = 0 '
+      "WHERE p.method IN ('cheque', 'promise') AND p.status = ? AND i.is_deleted = 0 AND i.is_draft = 0 "
       'ORDER BY p.due_date ASC, p.id ASC',
-      [methodCheque, statusPending],
+      [statusPending],
     );
     final out = <ChequeReminder>[];
     for (final r in rows) {
@@ -89,22 +256,34 @@ class InvoicePaymentRepository {
         customerName: ((r['customer_name'] as String?) ?? '').trim(),
         amount: (r['amount'] as num?)?.toDouble() ?? 0.0,
         dueDate: DateTime(due.year, due.month, due.day),
+        method: (r['method'] as String?) ?? PaymentMethods.cheque,
       ));
     }
     return out;
   }
 
-  /// ثبت پرداخت یک چک. اگر برای همان فاکتور چکِ در انتظارِ حساب مالی فروش
-  /// کالا هست، از همان «وصول چک» فعلی استفاده می‌شود (تراکنش‌های دفتر ثبت
-  /// می‌شوند و ردیف این جدول هم در همان تراکنش پرداخت‌شده می‌شود).
-  Future<void> markPaid({required int paymentId, required DateTime paidAt}) async {
+  /// ثبت پرداخت یک ردیف.
+  /// - فاکتور ترکیبی: ردیف پرداخت‌شده و سهم کالاییِ آن وارد حساب می‌شود.
+  ///   پرداخت جزئی فقط برای «پرداخت توافقی» مجاز است ([amount] کمتر از مبلغ
+  ///   ردیف): ردیف فعلی به مانده کاهش می‌یابد و یک ردیف پرداخت‌شده ساخته
+  ///   می‌شود. چک فقط کامل پرداخت می‌شود.
+  /// - فاکتور چکیِ قدیمی: اگر چکِ در انتظارِ حساب کالا هست از همان «وصول چک»
+  ///   فعلی استفاده می‌شود.
+  Future<void> markPaid({required int paymentId, required DateTime paidAt, double? amount}) async {
     final db = await _db.database;
     final rows = await db.query('invoice_payments', where: 'id = ?', whereArgs: [paymentId], limit: 1);
-    if (rows.isEmpty) throw StateError('این چک یافت نشد');
+    if (rows.isEmpty) throw StateError('این ردیف پرداخت یافت نشد');
     if (rows.first['status'] != statusPending) {
-      throw StateError('این چک قبلاً پرداخت‌شده ثبت شده است');
+      throw StateError('این پرداخت قبلاً ثبت شده است');
     }
     final invoiceId = (rows.first['invoice_id'] as num).toInt();
+    final inv = await db.query('invoices', columns: ['payment_type'], where: 'id = ?', whereArgs: [invoiceId], limit: 1);
+    final isCombined = inv.isNotEmpty && inv.first['payment_type'] == 'combined';
+
+    if (isCombined) {
+      await _markCombinedPaid(db, paymentId: paymentId, paidAt: paidAt, amount: amount);
+      return;
+    }
 
     final fin = await db.query('finance_cheques',
         where: 'invoice_id = ? AND status = ?', whereArgs: [invoiceId, 'pending'], limit: 1);
@@ -118,5 +297,56 @@ class InvoicePaymentRepository {
       where: 'id = ? AND status = ?',
       whereArgs: [paymentId, statusPending],
     );
+  }
+
+  Future<void> _markCombinedPaid(Database db,
+      {required int paymentId, required DateTime paidAt, double? amount}) async {
+    await db.transaction((txn) async {
+      final rows = await txn.query('invoice_payments', where: 'id = ?', whereArgs: [paymentId], limit: 1);
+      if (rows.isEmpty) throw StateError('این ردیف پرداخت یافت نشد');
+      final row = rows.first;
+      if (row['status'] != statusPending) throw StateError('این پرداخت قبلاً ثبت شده است');
+      final invoiceId = (row['invoice_id'] as num).toInt();
+      final method = (row['method'] as String?) ?? PaymentMethods.cash;
+      final lineAmount = (row['amount'] as num?)?.toDouble() ?? 0.0;
+      final pay = amount ?? lineAmount;
+      if (pay.isNaN || pay <= 0 || pay > lineAmount + 0.5) throw StateError('مبلغ پرداخت معتبر نیست');
+
+      if (pay < lineAmount - 0.5) {
+        if (method != PaymentMethods.promise) {
+          throw StateError('چک را فقط به‌صورت کامل می‌توان پرداخت‌شده ثبت کرد');
+        }
+        await txn.update('invoice_payments', {'amount': lineAmount - pay},
+            where: 'id = ?', whereArgs: [paymentId]);
+        await txn.insert('invoice_payments', {
+          'invoice_id': invoiceId,
+          'method': method,
+          'amount': pay,
+          'due_date': row['due_date'],
+          'status': statusPaid,
+          'paid_date': paidAt.toIso8601String(),
+          'notes': row['notes'],
+          'backup_uid': _newUid(),
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      } else {
+        await txn.update(
+          'invoice_payments',
+          {'status': statusPaid, 'paid_date': paidAt.toIso8601String()},
+          where: 'id = ?',
+          whereArgs: [paymentId],
+        );
+      }
+
+      final paid = await txn.rawQuery(
+          'SELECT SUM(amount) t FROM invoice_payments WHERE invoice_id = ? AND status = ?',
+          [invoiceId, statusPaid]);
+      final paidTotal = (paid.first['t'] as num?)?.toDouble() ?? 0.0;
+      await FinanceInvoicePosting.postPaymentShare(txn,
+          invoiceId: invoiceId,
+          paidTotalAfter: paidTotal,
+          at: paidAt,
+          label: PaymentMethods.label(method));
+    });
   }
 }
