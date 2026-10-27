@@ -6,6 +6,7 @@ import '../../models/app_settings.dart';
 import '../../repositories/finance_repository.dart';
 import '../../repositories/invoice_payment_repository.dart';
 import '../../repositories/settings_repository.dart';
+import '../../services/cheque_notification_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import '../invoices/invoice_detail_screen.dart';
@@ -166,7 +167,10 @@ class _ChequeRemindersCardState extends State<ChequeRemindersCard> with WidgetsB
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _load();
+    if (state == AppLifecycleState.resumed) {
+      ChequeNotificationService.invalidate();
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -178,6 +182,8 @@ class _ChequeRemindersCardState extends State<ChequeRemindersCard> with WidgetsB
         _items = items;
         _currency = settings.currency;
       });
+      // اعلان‌های گوشی با همین فهرست هماهنگ می‌شوند (فقط اگر فهرست عوض شده باشد).
+      ChequeNotificationService.sync(items);
     } catch (_) {}
   }
 
@@ -210,6 +216,19 @@ class _ChequeRemindersCardState extends State<ChequeRemindersCard> with WidgetsB
                 style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
         ]),
+        ValueListenableBuilder<bool?>(
+          valueListenable: ChequeNotificationService.notificationsAllowed,
+          builder: (_, allowed, __) => allowed == false
+              ? const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'اعلان‌های گوشی برای این برنامه خاموش است؛ یادآوری فقط داخل برنامه نمایش داده می‌شود. '
+                    'برای اعلان، از تنظیمات گوشی اعلان برنامه را روشن کنید.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
         const SizedBox(height: 8),
         for (final c in shown) _ReminderTile(item: c, currency: _currency, onChanged: _load),
         if (_items.length > shown.length)
