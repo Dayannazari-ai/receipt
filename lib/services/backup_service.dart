@@ -12,6 +12,7 @@ import '../repositories/finance_repository.dart';
 import '../repositories/invoice_repository.dart';
 import 'invoice_layout_storage.dart';
 import 'service_expense_backup.dart';
+import 'invoice_payment_backup.dart';
 
 /// نگاشت شناسه‌ی قدیمی (داخل فایل Backup) به شناسه‌ی جدید/موجود در دیتابیس
 /// مقصد، برای برندها و مدل‌های خودرو.
@@ -262,6 +263,9 @@ class BackupService {
         'vehicle_models': refs['vehicle_models'],
       },
     );
+    final invoicePayments = await db.query('invoice_payments');
+    envelope.data['invoice_payments'] = invoicePayments;
+    envelope.recordCounts['invoice_payments'] = invoicePayments.length;
     return _writeEnvelopeToFile(envelope, _fileNameFor(BackupType.invoices));
   }
 
@@ -334,6 +338,9 @@ class BackupService {
     final serviceExpenses = await db.query('service_expenses');
     data['service_expenses'] = serviceExpenses;
     counts['service_expenses'] = serviceExpenses.length;
+    final invoicePayments = await db.query('invoice_payments');
+    data['invoice_payments'] = invoicePayments;
+    counts['invoice_payments'] = invoicePayments.length;
 
     final envelope = BackupEnvelope(
       backupType: BackupType.full,
@@ -1093,6 +1100,7 @@ class BackupService {
             const {},
             report,
           );
+          await mergeInvoicePayments(txn, _list(data, 'invoice_payments'), _lastInvoiceIdMap, report);
           break;
 
         case BackupType.settings:
@@ -1126,6 +1134,7 @@ class BackupService {
             serviceIdMap,
             report,
           );
+          await mergeInvoicePayments(txn, _list(data, 'invoice_payments'), _lastInvoiceIdMap, report);
           await _mergeFinance(txn, _list(data, 'finance_accounts'), _list(data, 'finance_transactions'), report);
           await _mergeFinanceCheques(
               txn, _list(data, 'finance_cheques'), _list(data, 'finance_transactions'), report);
@@ -1375,6 +1384,7 @@ class BackupService {
       'finance_accounts': 'حساب مالی فروش کالا',
       'finance_transactions': 'تراکنش‌های مالی فروش کالا',
       'finance_cheques': 'چک‌های حساب مالی فروش کالا',
+      'invoice_payments': 'پرداخت‌ها و چک‌های فاکتور',
     };
     return labels[key] ?? key;
   }
