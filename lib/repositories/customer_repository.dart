@@ -48,13 +48,27 @@ class CustomerRepository {
     return Sqflite.firstIntValue(r) ?? 0;
   }
 
-  /// مشتریانی که حداقل یک فاکتور با نوع پرداخت «چک» دارند (بدهکار).
+  /// مشتریان بدهکار:
+  /// - فاکتور با نوع پرداخت «چک» (مثل قبل). فقط اگر چکِ آن در جدول
+  ///   پرداخت‌ها «پرداخت‌شده» ثبت شده باشد، دیگر بدهی حساب نمی‌شود؛ چک‌های
+  ///   قدیمی که ردیفی ندارند مثل قبل بدهی می‌مانند.
+  /// - فاکتور «پرداخت ترکیبی» (غیرپیش‌فاکتور) که هنوز ردیفِ در انتظار
+  ///   (چک / پرداخت توافقی) دارد یا مبلغ فاکتور از جمع ردیف‌های پرداخت
+  ///   بیشتر است (مانده‌ی تسویه‌نشده).
   Future<List<Customer>> getDebtors() async {
     final db = await _db.database;
     final rows = await db.rawQuery('''
       SELECT DISTINCT c.* FROM customers c
       JOIN invoices i ON i.customer_id = c.id
-      WHERE c.is_deleted = 0 AND i.is_deleted = 0 AND i.payment_type = 'nonCash'
+      WHERE c.is_deleted = 0 AND i.is_deleted = 0 AND (
+        (i.payment_type = 'nonCash' AND NOT EXISTS (
+          SELECT 1 FROM invoice_payments p
+          WHERE p.invoice_id = i.id AND p.method = 'cheque' AND p.status = 'paid'))
+        OR
+        (i.payment_type = 'combined' AND i.is_draft = 0 AND (
+          EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_id = i.id AND p.status = 'pending')
+          OR i.final_amount - COALESCE((SELECT SUM(p.amount) FROM invoice_payments p WHERE p.invoice_id = i.id), 0) > 0.5))
+      )
       ORDER BY c.name
     ''');
     return rows.map((r) => Customer.fromMap(r)).toList();
