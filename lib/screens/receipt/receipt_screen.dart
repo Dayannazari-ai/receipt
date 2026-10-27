@@ -17,6 +17,7 @@ import '../../repositories/payment_account_repository.dart';
 import '../../repositories/settings_repository.dart';
 import '../../repositories/finance_repository.dart';
 import '../../repositories/invoice_visit_repository.dart';
+import '../reminders/cheque_reminders.dart';
 import '../../services/invoice_service.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
@@ -783,7 +784,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           ),
         ],
       ),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
+            body: ListView(padding: const EdgeInsets.all(16), children: [
+        const ChequeRemindersCard(),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(color: primary.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
