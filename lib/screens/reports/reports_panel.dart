@@ -476,7 +476,7 @@ class _ReportsPanelState extends State<ReportsPanel> {
       for (final t in _serviceTypes)
         if (incomeByType[t] != null)
           _kv('${_typeLabels[t]} — ${_n(incomeByType[t]!.invoiceCount)} فاکتور', _money(incomeByType[t]!.total), indent: 12),
-      if (nonCash > 0) _kv('از این مبلغ، غیرنقد (چک)', _money(nonCash), indent: 12),
+      if (nonCash > 0) _kv('از این مبلغ، هنوز دریافت‌نشده (چک / توافقی)', _money(nonCash), indent: 12),
       const Divider(),
       _kv('هزینه‌های خدماتی', _money(expTotal), color: red, bold: true),
       for (final entry in ServiceExpense.categories.entries)
