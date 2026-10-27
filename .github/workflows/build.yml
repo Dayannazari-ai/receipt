@@ -52,6 +52,40 @@ jobs:
           grep -q 'requestLegacyExternalStorage' "$MANIFEST" || sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' "$MANIFEST"
           echo "---- manifest storage lines ----"
           grep -E 'EXTERNAL_STORAGE|requestLegacy' "$MANIFEST"
+              - name: Add notification permissions and receivers
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q 'POST_NOTIFICATIONS' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
+          grep -q 'RECEIVE_BOOT_COMPLETED' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />' "$MANIFEST"
+          grep -q 'android.permission.VIBRATE' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
+          if ! grep -q 'ScheduledNotificationBootReceiver' "$MANIFEST"; then
+            sed -i 's#</application>#    <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n    <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n      <intent-filter>\n        <action android:name="android.intent.action.BOOT_COMPLETED"/>\n        <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n        <action android:name="android.intent.action.QUICKBOOT_POWERON" />\n        <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>\n      </intent-filter>\n    </receiver>\n  </application>#' "$MANIFEST"
+          fi
+          echo "---- manifest notification lines ----"
+          grep -E 'POST_NOTIFICATIONS|BOOT_COMPLETED|ScheduledNotification' "$MANIFEST"
+      - name: Enable core library desugaring (needed by flutter_local_notifications)
+        run: |
+          KTS=android/app/build.gradle.kts
+          GRV=android/app/build.gradle
+          if [ -f "$KTS" ]; then
+            grep -q 'isCoreLibraryDesugaringEnabled' "$KTS" || sed -i '0,/compileOptions {/s//compileOptions {\n        isCoreLibraryDesugaringEnabled = true/' "$KTS"
+            grep -q 'desugar_jdk_libs' "$KTS" || cat >> "$KTS" <<'EOF'
+
+          dependencies {
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+          }
+          EOF
+            echo "---- $KTS ----"; grep -nE 'esugar|compileOptions' "$KTS"
+          elif [ -f "$GRV" ]; then
+            grep -q 'coreLibraryDesugaringEnabled' "$GRV" || sed -i '0,/compileOptions {/s//compileOptions {\n        coreLibraryDesugaringEnabled true/' "$GRV"
+            grep -q 'desugar_jdk_libs' "$GRV" || cat >> "$GRV" <<'EOF'
+
+          dependencies {
+              coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+          }
+          EOF
+            echo "---- $GRV ----"; grep -nE 'esugar|compileOptions' "$GRV"
+          fi
       - name: Get packages
         run: flutter pub get
       - name: Force compileSdk 36 everywhere
