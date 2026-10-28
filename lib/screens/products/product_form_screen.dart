@@ -17,6 +17,8 @@ class ProductFormScreen extends StatefulWidget {
 }
 
 class _ProductFormScreenState extends State<ProductFormScreen> {
+  static const String _duplicateMessage = 'این کد کالا تکراری است؛ لطفاً کد دیگری وارد کنید';
+
   final _repo = ProductRepository();
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
@@ -29,6 +31,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   late final TextEditingController _minStockCtrl;
   late final TextEditingController _notesCtrl;
   bool _saving = false;
+  String? _autoCode; // آخرین کدی که خودکار پیشنهاد شده
+  String? _codeError;
 
   bool get _isEdit => widget.product != null;
 
@@ -45,6 +49,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _stockCtrl = TextEditingController(text: p?.stock.toString() ?? '0');
     _minStockCtrl = TextEditingController(text: p?.minStock.toString() ?? '0');
     _notesCtrl = TextEditingController(text: p?.notes ?? '');
+    // کالای جدید: کد مناسب خودکار پیشنهاد می‌شود (قابل تغییر).
+    if (!_isEdit) _suggestCode(onlyIfEmpty: true);
+  }
+
+  /// کوچک‌ترین کد آزاد؛ اگر نبود، شماره‌ی بعد از آخرین کد.
+  Future<void> _suggestCode({bool onlyIfEmpty = false}) async {
+    try {
+      final info = await _repo.loadCodeInfo();
+      if (!mounted) return;
+      if (onlyIfEmpty && _codeCtrl.text.trim().isNotEmpty) return;
+      setState(() {
+        _codeCtrl.text = info.suggested;
+        _autoCode = info.suggested;
+        _codeError = null;
+      });
+    } catch (_) {}
   }
 
   Future<void> _scanBarcode() async {
@@ -65,15 +85,28 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() => _voiceLabelCtrl.text = text);
   }
 
+  void _showDuplicate() {
+    if (!mounted) return;
+    setState(() => _codeError = _duplicateMessage);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(_duplicateMessage)));
+  }
+
+  Future<int> _write(Product p) async {
+    if (_isEdit) {
+      await _repo.update(p);
+      return p.id!;
+    }
+    return _repo.insert(p);
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final codeExists = await _repo.codeExists(_codeCtrl.text.trim(), excludeId: widget.product?.id);
-    if (codeExists) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('این کد کالا قبلاً استفاده شده است')));
-      }
+    // کنترل تکراری بودن کد (حروف بزرگ/کوچک و فاصله اثری ندارند؛ کد فعلی خودِ
+    // همین کالا تکراری حساب نمی‌شود). بررسی نهایی داخل تراکنش دیتابیس هم هست.
+    final code = _codeCtrl.text.trim();
+    if (await _repo.codeExists(code, excludeId: widget.product?.id)) {
+      _showDuplicate();
       return;
     }
 
@@ -108,10 +141,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
     setState(() => _saving = true);
     try {
-      final newProduct = Product(
+      var newProduct = Product(
         id: widget.product?.id,
         name: _nameCtrl.text.trim(),
-        code: _codeCtrl.text.trim(),
+        code: code,
         barcode: barcode.isEmpty ? null : barcode,
         voiceSearchLabel: _voiceLabelCtrl.text.trim().isEmpty ? null : _voiceLabelCtrl.text.trim(),
         purchasePrice: double.parse(ThousandsInputFormatter.unformat(_purchaseCtrl.text)),
@@ -122,11 +155,29 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         createdAt: widget.product?.createdAt,
       );
       int savedId;
-      if (_isEdit) {
-        await _repo.update(newProduct);
-        savedId = newProduct.id!;
-      } else {
-        savedId = await _repo.insert(newProduct);
+      try {
+        savedId = await _write(newProduct);
+      } on DuplicateCodeException {
+        // اگر کد همان پیشنهاد خودکار بوده و در این فاصله گرفته شده، کد تازه
+        // گرفته و یک‌بار دیگر تلاش می‌شود؛ کد دستیِ کاربر هرگز عوض نمی‌شود.
+        if (!_isEdit && _autoCode != null && code == _autoCode) {
+          final info = await _repo.loadCodeInfo();
+          if (mounted) {
+            setState(() {
+              _codeCtrl.text = info.suggested;
+              _autoCode = info.suggested;
+            });
+          }
+          try {
+            savedId = await _write(newProduct.copyWith(code: info.suggested));
+          } on DuplicateCodeException {
+            _showDuplicate();
+            return;
+          }
+        } else {
+          _showDuplicate();
+          return;
+        }
       }
       final saved = await _repo.getById(savedId);
       if (mounted) Navigator.of(context).pop(saved);
@@ -172,7 +223,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           const SizedBox(height: 12),
           TextFormField(
               controller: _codeCtrl,
-              decoration: const InputDecoration(labelText: 'کد کالا'),
+              decoration: InputDecoration(
+                labelText: 'کد کالا',
+                errorText: _codeError,
+                helperText: _isEdit ? null : 'کد خودکار پیشنهاد می‌شود؛ در صورت نیاز تغییرش دهید',
+                suffixIcon: IconButton(
+                  tooltip: 'کد پیشنهادی (کوچک‌ترین کد آزاد)',
+                  icon: const Icon(Icons.auto_fix_high),
+                  onPressed: () => _suggestCode(),
+                ),
+              ),
+              onChanged: (_) {
+                if (_codeError != null) setState(() => _codeError = null);
+              },
               validator: (v) => Validators.required(v, fieldName: 'کد کالا')),
           const SizedBox(height: 12),
           Row(children: [
