@@ -6,6 +6,7 @@ import '../../repositories/settings_repository.dart';
 import '../../utils/currency_formatter.dart';
 import '../../utils/persian_date.dart';
 import 'product_form_screen.dart';
+import 'product_codes_screen.dart';
 
 /// تبدیل ارقام فارسی/عربی به انگلیسی فقط برای مقایسهٔ کدها در مرتب‌سازی.
 String _normDigits(String s) {
@@ -160,6 +161,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
               child: const Text('بر اساس کد'),
             ),
           ],
+        ),
+                IconButton(
+          icon: const Icon(Icons.pin_outlined),
+          tooltip: 'مدیریت کدهای کالا',
+          onPressed: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const ProductCodesScreen())),
         ),
         IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
       ]),
