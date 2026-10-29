@@ -26,7 +26,7 @@ class DatabaseHelper {
   // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
   // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
   // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
-  static const int dbVersion = 11;
+  static const int dbVersion = 12;
 
   Database? _db;
 
@@ -163,6 +163,7 @@ class DatabaseHelper {
     ''');
     batch.execute('CREATE INDEX idx_products_code ON products(code)');
     batch.execute('CREATE INDEX idx_products_name ON products(name)');
+    batch.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_products_code_unique ON products(code COLLATE NOCASE)');
 
     batch.execute('''
       CREATE TABLE payment_accounts (
@@ -453,7 +454,16 @@ class DatabaseHelper {
         } catch (_) {}
       }
     }
-        if (oldVersion < 11) {
+     if (oldVersion < 12) {
+      // نسخه ۱۲: یکتایی کد کالا در خود دیتابیس (بدون تفاوت حروف بزرگ/کوچک). اگر
+      // کد تکراریِ قدیمی وجود داشته باشد ساخته نمی‌شود و برنامه بدون خطا ادامه
+      // می‌دهد؛ کنترل برنامه فعال می‌ماند و صفحه‌ی «مدیریت کدهای کالا» هشدار می‌دهد.
+      try {
+        await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_products_code_unique ON products(code COLLATE NOCASE)');
+      } catch (_) {}
+        }    
+    if (oldVersion < 11) {
       // نسخه ۱۱: جدول کاملاً جدید پرداخت‌ها/چک‌ها؛ داده‌ی قبلی لمس نمی‌شود.
       for (final sql in _financeSchema) {
         try {
