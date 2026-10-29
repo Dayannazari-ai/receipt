@@ -606,7 +606,7 @@ class BackupService {
       final code = (prod['code'] as String?)?.trim() ?? '';
       int? matchedId;
       if (code.isNotEmpty) {
-        final rows = await txn.query('products', where: 'code = ?', whereArgs: [code], limit: 1);
+        final rows = await txn.query('products', where: 'code = ? COLLATE NOCASE', whereArgs: [code], limit: 1);
         if (rows.isNotEmpty) matchedId = rows.first['id'] as int?;
       }
       if (matchedId != null) {
