@@ -48,6 +48,37 @@ class CustomerRepository {
     return Sqflite.firstIntValue(r) ?? 0;
   }
 
+  /// شناسه‌ی مشتریانی که حداقل یک خودروی حذف‌نشده مطابق شرط‌ها دارند.
+  /// فقط خواندن است و هیچ داده‌ای تغییر نمی‌کند.
+  /// - [brandId] / [modelId]: فیلتر دقیق برند و مدل.
+  /// - [text]: متن جستجو؛ هر کلمه‌ی آن باید در «برند + مدل» خودرو بیاید
+  ///   (مثلاً «پژو 206» یا «206» یا «پژو»).
+  Future<Set<int>> customerIdsByVehicle({int? brandId, int? modelId, String? text}) async {
+    final db = await _db.database;
+    final where = <String>['v.is_deleted = 0'];
+    final args = <Object?>[];
+    if (brandId != null) {
+      where.add('v.brand_id = ?');
+      args.add(brandId);
+    }
+    if (modelId != null) {
+      where.add('v.model_id = ?');
+      args.add(modelId);
+    }
+    final tokens = (text ?? '').trim().split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
+    for (final t in tokens) {
+      where.add("(IFNULL(b.name, '') || ' ' || IFNULL(m.name, '')) LIKE ?");
+      args.add('%$t%');
+    }
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT v.customer_id AS cid FROM vehicles v
+      LEFT JOIN vehicle_brands b ON b.id = v.brand_id
+      LEFT JOIN vehicle_models m ON m.id = v.model_id
+      WHERE ${where.join(' AND ')}
+    ''', args);
+    return rows.map((r) => (r['cid'] as num).toInt()).toSet();
+  }
+
   /// مشتریان بدهکار:
   /// - فاکتور با نوع پرداخت «چک» (مثل قبل). فقط اگر چکِ آن در جدول
   ///   پرداخت‌ها «پرداخت‌شده» ثبت شده باشد، دیگر بدهی حساب نمی‌شود؛ چک‌های
