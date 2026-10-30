@@ -83,6 +83,11 @@ class PdfService {
   /// بزرگ می‌شود و کج یا کشیده نمی‌شود.
   static const double _headerIconsRowScale = 1.12;
 
+  /// موتور PDF نیم‌فاصله (ZWNJ) را درست رسم نمی‌کند و حرف‌های دو طرفش روی هم
+  /// می‌افتند (مثل «می‌باشد»، «شرف‌الدین»). پیش از چاپ، نیم‌فاصله با فاصله‌ی
+  /// معمولی جایگزین می‌شود. فقط متنِ چاپ‌شده در PDF عوض می‌شود، نه داده‌ی ذخیره‌شده.
+  static String _fa(String s) => s.replaceAll('\u200C', ' ');
+
   static Future<void> _loadFonts() async {
     if (_regularFont != null) return;
     try {
@@ -327,7 +332,7 @@ class PdfService {
                   pw.SizedBox(width: l.headerIconToTextSpacing),
                 ],
                 pw.Expanded(
-                  child: pw.Text(address,
+                  child: pw.Text(_fa(address),
                       style: pw.TextStyle(fontSize: l.headerSubTitleFontSize, color: c.subtleText)),
                 ),
               ]),
@@ -344,7 +349,7 @@ class PdfService {
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
           if (shopName.isNotEmpty)
-            pw.Text(shopName,
+            pw.Text(_fa(shopName),
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
                     fontSize: l.headerCompanyNameFontSize,
@@ -355,7 +360,7 @@ class PdfService {
             pw.Row(mainAxisAlignment: pw.MainAxisAlignment.center, children: [
               subtitleDash(),
               pw.SizedBox(width: l.headerIconToTextSpacing * 2),
-              pw.Text(subtitle,
+              pw.Text(_fa(subtitle),
                   style: pw.TextStyle(
                       fontSize: l.headerSubTitleFontSize + _headerSubtitleExtraFontSize,
                       color: c.darkGray)),
@@ -413,7 +418,7 @@ class PdfService {
   static pw.Widget _headerInfoLine(InvoiceLayoutSettings l, _Palette c, String label, String value) =>
       pw.Padding(
         padding: pw.EdgeInsets.symmetric(vertical: l.headerInfoLineVerticalPadding),
-        child: pw.Text('$label: $value', style: pw.TextStyle(fontSize: l.headerInfoFontSize, color: c.text)),
+        child: pw.Text(_fa('$label: $value'), style: pw.TextStyle(fontSize: l.headerInfoFontSize, color: c.text)),
       );
 
   /// نوار پایین صفحه: تصویر تزئینی واقعی در صورت وجود، وگرنه بدیل رنگی ساده.
@@ -453,7 +458,7 @@ class PdfService {
           alignment: pw.Alignment.center,
           padding: pw.EdgeInsets.symmetric(
               horizontal: l.tableCellHorizontalPadding, vertical: l.customerBoxPadding),
-          child: pw.Text(text,
+          child: pw.Text(_fa(text),
               textAlign: pw.TextAlign.center,
               style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
         );
@@ -483,7 +488,7 @@ class PdfService {
         borderRadius: pw.BorderRadius.circular(l.customerBoxCornerRadius),
       ),
       child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-        pw.Text('مشتری: ${cust.name}', style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
+        pw.Text(_fa('مشتری: ${cust.name}'), style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
         pw.Text('موبایل: ${PersianDateUtil.toPersianDigits(cust.mobile)}',
             style: pw.TextStyle(fontSize: l.customerBoxFontSize, color: c.text)),
         if (mileageKm != null)
@@ -505,7 +510,7 @@ class PdfService {
     pw.Widget cell(String text) => pw.Padding(
           padding: pw.EdgeInsets.symmetric(
               vertical: l.tableRowVerticalPadding, horizontal: l.tableCellHorizontalPadding),
-          child: pw.Text(text,
+          child: pw.Text(_fa(text),
               textAlign: pw.TextAlign.center,
               style: pw.TextStyle(fontSize: l.tableCellFontSize, color: c.text)),
         );
@@ -565,7 +570,7 @@ class PdfService {
     pw.Widget cell(String text) => pw.Padding(
           padding: pw.EdgeInsets.symmetric(
               vertical: l.tableRowVerticalPadding, horizontal: l.tableCellHorizontalPadding),
-          child: pw.Text(text,
+          child: pw.Text(_fa(text),
               textAlign: pw.TextAlign.center,
               style: pw.TextStyle(fontSize: l.sideCostsItemFontSize, color: c.text)),
         );
@@ -593,7 +598,7 @@ class PdfService {
         );
 
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-      pw.Text('هزینه‌های جانبی',
+      pw.Text(_fa('هزینه‌های جانبی'),
           style: pw.TextStyle(
               fontWeight: pw.FontWeight.bold, fontSize: l.sideCostsTitleFontSize, color: c.darkGray)),
       pw.SizedBox(height: 3),
@@ -620,7 +625,7 @@ class PdfService {
   static List<pw.Widget> _notesSection(InvoiceLayoutSettings l, _Palette c, String notes) {
     return [
       pw.SizedBox(height: l.notesTopSpacing),
-      pw.Text('توضیحات: $notes', style: pw.TextStyle(fontSize: l.notesFontSize, color: c.text)),
+      pw.Text(_fa('توضیحات: $notes'), style: pw.TextStyle(fontSize: l.notesFontSize, color: c.text)),
     ];
   }
 
@@ -665,7 +670,7 @@ class PdfService {
 
     pw.Widget bullet(String text) => pw.Padding(
           padding: pw.EdgeInsets.only(bottom: l.termsLineSpacing),
-          child: pw.Text('•  $text', style: pw.TextStyle(fontSize: l.termsFontSize, color: c.darkGray)),
+          child: pw.Text(_fa('•  $text'), style: pw.TextStyle(fontSize: l.termsFontSize, color: c.darkGray)),
         );
 
     final columnWidgets = <pw.Widget>[];
