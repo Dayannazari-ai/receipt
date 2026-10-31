@@ -13,6 +13,7 @@ import '../../main.dart';
 import 'price_list_import_screen.dart';
 import 'invoice_template_settings_screen.dart';
 import 'backup_restore_screen.dart';
+import 'caller_id_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -523,6 +524,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await _seedService.deleteAllSampleData();
               setState(() => _busy = false);
             },
+          ),
+          const SizedBox(height: 28),
+          const Divider(),
+          const SizedBox(height: 12),
+          const Text('شناسایی تماس ورودی', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const SizedBox(height: 6),
+          const Text('نام مشتری و خودروی او هنگام تماس ورودی روی صفحه نمایش داده می‌شود. مخاطبین گوشی شما خوانده یا تغییر داده نمی‌شوند.',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.phone_callback_outlined),
+            label: const Text('تنظیمات شناسایی تماس'),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const CallerIdSettingsScreen())),
           ),
           if (_busy) ...[const SizedBox(height: 20), const Center(child: CircularProgressIndicator())],
         ]),
