@@ -86,6 +86,27 @@ jobs:
           EOF
             echo "---- $GRV ----"; grep -nE 'esugar|compileOptions' "$GRV"
           fi
+      - name: Add caller-ID native code, permissions and screening service
+        run: |
+          KT_DIR=android/app/src/main/kotlin
+          MA=$(find "$KT_DIR" -name MainActivity.kt | head -1)
+          if [ -z "$MA" ]; then echo "MainActivity.kt not found"; exit 1; fi
+          PKG_LINE=$(grep -m1 '^package ' "$MA")
+          if [ -z "$PKG_LINE" ]; then echo "package line not found in MainActivity.kt"; exit 1; fi
+          mkdir -p "$KT_DIR/com/receiptapp/callerid"
+          cp ci/android/callerid/*.kt "$KT_DIR/com/receiptapp/callerid/"
+          { echo "$PKG_LINE"; echo; cat ci/android/MainActivity.body.kt; } > "$MA"
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q 'SYSTEM_ALERT_WINDOW' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />' "$MANIFEST"
+          grep -q 'READ_CONTACTS' "$MANIFEST" || sed -i '/<manifest /a\    <uses-permission android:name="android.permission.READ_CONTACTS" />' "$MANIFEST"
+          if ! grep -q 'CallerIdScreeningService' "$MANIFEST"; then
+            sed -i 's#</application>#    <service android:name="com.receiptapp.callerid.CallerIdScreeningService" android:exported="true" android:permission="android.permission.BIND_SCREENING_SERVICE">\n      <intent-filter>\n        <action android:name="android.telecom.CallScreeningService" />\n      </intent-filter>\n    </service>\n  </application>#' "$MANIFEST"
+          fi
+          echo "---- caller-id manifest lines ----"
+          grep -nE 'SYSTEM_ALERT_WINDOW|READ_CONTACTS|CallerIdScreeningService|BIND_SCREENING' "$MANIFEST"
+          echo "---- MainActivity head ----"
+          head -n 5 "$MA"
+   
       - name: Get packages
         run: flutter pub get
       - name: Force compileSdk 36 everywhere
