@@ -1,165 +1,190 @@
-import 'package:sqflite/sqflite.dart';
-import '../database/database_helper.dart';
+import 'dart:io';
+import 'package:excel/excel.dart';
 import '../models/service.dart';
+import '../repositories/service_repository.dart';
+import '../repositories/vehicle_reference_repository.dart';
 
-class ServiceCategoryRepository {
-  final _db = DatabaseHelper.instance;
+class PriceListImportService {
+  final _serviceRepo = ServiceRepository();
+  final _vehicleRepo = VehicleReferenceRepository();
 
-  Future<int> insert(ServiceCategory c) async {
-    final db = await _db.database;
-    return db.insert('service_categories', c.toMap()..remove('id'));
+  String? _cellText(CellValue? cv) {
+    if (cv == null) return null;
+    final s = cv.toString().trim();
+    return s.isEmpty ? null : s;
   }
 
-  Future<List<ServiceCategory>> getAll() async {
-    final db = await _db.database;
-    final rows = await db.query('service_categories', where: 'is_deleted = 0', orderBy: 'name');
-    return rows.map((r) => ServiceCategory.fromMap(r)).toList();
+  double? _cellNumber(CellValue? cv) {
+    final text = _cellText(cv);
+    if (text == null) return null;
+    return double.tryParse(text.replaceAll(',', ''));
   }
 
-  Future<void> ensureDefaults() async {
-    final existing = await getAll();
-    if (existing.isNotEmpty) return;
-    for (final name in ['برق خودرو', 'مکانیک', 'جلوبندی']) {
-      await insert(ServiceCategory(name: name));
-    }
+  String _norm(String s) => s
+      .replaceAll('ي', 'ی')
+      .replaceAll('ك', 'ک')
+      .replaceAll('\u200c', ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim()
+      .toLowerCase();
+
+  (String, String?) _splitHeader(String text) {
+    final i = text.indexOf('|');
+    if (i < 0) return (text.trim(), null);
+    final brand = text.substring(0, i).trim();
+    final model = text.substring(i + 1).trim();
+    if (brand.isEmpty) return (text.replaceAll('|', '').trim(), null);
+    return (brand, model.isEmpty ? null : model);
   }
-}
 
-class ServiceRepository {
-  final _db = DatabaseHelper.instance;
+  List<(String, String?, String?, double)> _extractEntries(String path) {
+    final bytes = File(path).readAsBytesSync();
+    final excel = Excel.decodeBytes(bytes);
+    final entries = <(String, String?, String?, double)>[];
 
-  Future<int> insert(ServiceItem s) async {
-    final db = await _db.database;
-    return db.insert('services', s.toMap()..remove('id'));
-  }
+    for (final sheet in excel.tables.values) {
+      if (sheet.maxRows == 0) continue;
+      final header = sheet.row(0);
 
-  /// ویرایش خدمت. اگر قیمت تغییر کرده باشد، در تاریخچه ثبت می‌شود.
-  Future<void> update(ServiceItem oldItem, ServiceItem newItem) async {
-    final db = await _db.database;
-    await db.transaction((txn) async {
-      await txn.update('services', newItem.toMap(), where: 'id = ?', whereArgs: [newItem.id]);
-      if (oldItem.price != newItem.price) {
-        await txn.insert(
-            'service_price_history',
-            {
-              'service_id': newItem.id,
-              'old_price': oldItem.price,
-              'new_price': newItem.price,
-              'changed_at': DateTime.now().toIso8601String(),
-            });
+      int? serviceColIndex;
+      for (var i = 0; i < header.length; i++) {
+        final text = _cellText(header[i]?.value);
+        if (text != null &&
+            (text.contains('خدمات') ||
+                text.contains('خدمت') ||
+                text.contains('تعمیرات') ||
+                text.contains('شرح') ||
+                text.contains('عنوان'))) {
+          serviceColIndex = i;
+          break;
+        }
       }
-    });
-  }
+      if (serviceColIndex == null) continue;
 
-  Future<int> softDelete(int id) async {
-    final db = await _db.database;
-    return db.update('services', {'is_deleted': 1}, where: 'id = ?', whereArgs: [id]);
-  }
-
-  /// حذف نرم گروهی: فقط ستون is_deleted همین خدمات ۱ می‌شود (مثل حذف تکی).
-  /// به جدول فاکتورها و اقلام آن‌ها و تاریخچه قیمت دست نمی‌زند.
-  /// همه در یک تراکنش انجام می‌شود: یا همه حذف می‌شوند یا هیچ‌کدام.
-  Future<int> softDeleteMany(List<int> ids) async {
-    if (ids.isEmpty) return 0;
-    final db = await _db.database;
-    return db.transaction((txn) async {
-      var affected = 0;
-      const chunkSize = 500;
-      for (var i = 0; i < ids.length; i += chunkSize) {
-        final end = (i + chunkSize < ids.length) ? i + chunkSize : ids.length;
-        final chunk = ids.sublist(i, end);
-        final placeholders = List.filled(chunk.length, '?').join(',');
-        affected += await txn.rawUpdate(
-            'UPDATE services SET is_deleted = 1 WHERE id IN ($placeholders)', chunk);
+      final brandCols = <int, (String, String?)>{};
+      for (var i = 0; i < serviceColIndex; i++) {
+        final text = _cellText(header[i]?.value);
+        if (text != null) brandCols[i] = _splitHeader(text);
       }
-      return affected;
-    });
-  }
+      final isFlat = brandCols.length <= 1;
 
-  Future<ServiceItem?> getById(int id) async {
-    final db = await _db.database;
-    final rows = await db.query('services', where: 'id = ?', whereArgs: [id]);
-    return rows.isEmpty ? null : ServiceItem.fromMap(rows.first);
-  }
+      for (var r = 1; r < sheet.maxRows; r++) {
+        final row = sheet.row(r);
+        if (row.length <= serviceColIndex) continue;
+        final name = _cellText(row[serviceColIndex]?.value);
+        if (name == null) continue;
 
-  Future<List<ServiceItem>> getAll({bool onlyActive = false}) async {
-    final db = await _db.database;
-    String where = 'is_deleted = 0';
-    if (onlyActive) where += ' AND is_active = 1';
-    final rows = await db.query('services', where: where, orderBy: 'name');
-    return rows.map((r) => ServiceItem.fromMap(r)).toList();
-  }
-
-  Future<List<ServiceItem>> getByCategory(int categoryId) async {
-    final db = await _db.database;
-    final rows = await db.query('services',
-        where: 'category_id = ? AND is_deleted = 0', whereArgs: [categoryId], orderBy: 'name');
-    return rows.map((r) => ServiceItem.fromMap(r)).toList();
-  }
-
-  Future<List<ServiceItem>> search(String q) async {
-    final db = await _db.database;
-    final like = '%$q%';
-    final rows = await db.query('services',
-        where: 'is_deleted = 0 AND (name LIKE ? OR code LIKE ?)', whereArgs: [like, like], orderBy: 'name');
-    return rows.map((r) => ServiceItem.fromMap(r)).toList();
-  }
-  /// جستجوی فازی/نزدیک برای جستجوی صوتی خدمات.
-  Future<List<ServiceItem>> searchFuzzy(String query) async {
-    final db = await _db.database;
-    final tokens = query.trim().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
-    if (tokens.isEmpty) return [];
-    final whereParts = <String>[];
-    final args = <String>[];
-    for (final t in tokens) {
-      whereParts.add('(name LIKE ? OR voice_search_label LIKE ?)');
-      args.add('%$t%');
-      args.add('%$t%');
-    }
-    final rows = await db.query('services',
-        where: 'is_deleted = 0 AND (${whereParts.join(' AND ')})', whereArgs: args, orderBy: 'name');
-    return rows.map((r) => ServiceItem.fromMap(r)).toList();
-  }
-
-  Future<bool> codeExists(String code, {int? excludeId}) async {
-    final db = await _db.database;
-    final rows = await db.query('services',
-        where: excludeId == null ? 'code = ?' : 'code = ? AND id != ?',
-        whereArgs: excludeId == null ? [code] : [code, excludeId]);
-    return rows.isNotEmpty;
-  }
-
-  Future<List<ServicePriceHistory>> getPriceHistory(int serviceId) async {
-    final db = await _db.database;
-    final rows = await db.query('service_price_history',
-        where: 'service_id = ?', whereArgs: [serviceId], orderBy: 'changed_at DESC');
-    return rows.map((r) => ServicePriceHistory.fromMap(r)).toList();
-  }
-
-  /// یافتن خدمت با در نظر گرفتن برند/مدل خودروی انتخاب‌شده (در صورت وجود قیمت اختصاصی)
-  Future<List<ServiceItem>> getByCategoryAndVehicle(
-      int categoryId, int? brandId, int? modelId) async {
-    final db = await _db.database;
-    final rows = await db.query('services',
-        where: 'category_id = ? AND is_deleted = 0 AND is_active = 1', whereArgs: [categoryId]);
-    final all = rows.map((r) => ServiceItem.fromMap(r)).toList();
-
-    // گروه‌بندی بر اساس نام: اگر نسخه‌ی مخصوص برند/مدل موجود باشد، همان انتخاب شود
-    final Map<String, ServiceItem> byName = {};
-    for (final s in all) {
-      final matchesVehicle =
-          (s.brandId == null) || (s.brandId == brandId && (s.modelId == null || s.modelId == modelId));
-      if (!matchesVehicle) continue;
-      final existing = byName[s.name];
-      if (existing == null) {
-        byName[s.name] = s;
-      } else {
-        // اولویت با نسخه‌ای که دقیق‌تر با برند/مدل مطابقت دارد
-        final existingScore = (existing.brandId != null ? 1 : 0) + (existing.modelId != null ? 1 : 0);
-        final newScore = (s.brandId != null ? 1 : 0) + (s.modelId != null ? 1 : 0);
-        if (newScore > existingScore) byName[s.name] = s;
+        if (isFlat) {
+          if (brandCols.isEmpty) continue;
+          final priceIdx = brandCols.keys.first;
+          if (row.length <= priceIdx) continue;
+          final price = _cellNumber(row[priceIdx]?.value);
+          if (price == null) continue;
+          entries.add((name, null, null, price));
+        } else {
+          for (final entry in brandCols.entries) {
+            if (row.length <= entry.key) continue;
+            final price = _cellNumber(row[entry.key]?.value);
+            if (price == null) continue;
+            entries.add((name, entry.value.$1, entry.value.$2, price));
+          }
+        }
       }
     }
-    return byName.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+    return entries;
+  }
+
+  Future<List<Map<String, dynamic>>> previewFile(String path) async {
+    final entries = _extractEntries(path);
+    return entries
+        .take(15)
+        .map((e) => {
+              'name': e.$1,
+              'brand': e.$2 == null
+                  ? 'همه برندها'
+                  : (e.$3 == null ? e.$2! : '${e.$2} - ${e.$3}'),
+              'price': e.$4,
+            })
+        .toList();
+  }
+
+  Future<int> countEntries(String path) async => _extractEntries(path).length;
+
+  Future<({int services, int brands})> importFromFile({
+    required String path,
+    required int categoryId,
+  }) async {
+    final entries = _extractEntries(path);
+    if (entries.isEmpty) {
+      throw StateError(
+          'هیچ ردیف معتبری در فایل پیدا نشد. مطمئن شوید سرستون یکی از سلول‌های سطر اول شامل کلمه‌ی «خدمات»، «خدمت»، «تعمیرات» یا «شرح» است.');
+    }
+
+    final existingBrands = await _vehicleRepo.getAllBrands();
+    final Map<String, int> brandIdByName = {
+      for (final b in existingBrands) _norm(b.name): b.id!
+    };
+    final Map<int, Map<String, int>> modelIdByBrand = {};
+    int brandsAdded = 0;
+
+    Future<Map<String, int>> modelsOf(int brandId) async {
+      final cached = modelIdByBrand[brandId];
+      if (cached != null) return cached;
+      final list = await _vehicleRepo.getModelsByBrand(brandId);
+      final map = <String, int>{for (final m in list) _norm(m.name): m.id!};
+      modelIdByBrand[brandId] = map;
+      return map;
+    }
+
+    final codePrefix = await _serviceRepo.autoCodePrefixForCategory(categoryId);
+    var codeNumber = (await _serviceRepo.maxAutoNumber(codePrefix)) + 1;
+    int servicesAdded = 0;
+
+    for (final entry in entries) {
+      final (name, brandName, modelName, price) = entry;
+      int? brandId;
+      int? modelId;
+
+      if (brandName != null) {
+        final bKey = _norm(brandName);
+        if (!brandIdByName.containsKey(bKey)) {
+          final id = await _vehicleRepo.insertBrand(brandName);
+          brandIdByName[bKey] = id;
+          brandsAdded++;
+        }
+        brandId = brandIdByName[bKey];
+
+        if (modelName != null && brandId != null) {
+          final models = await modelsOf(brandId);
+          final mKey = _norm(modelName);
+          var mid = models[mKey];
+          if (mid == null) {
+            mid = await _vehicleRepo.insertModel(brandId, modelName);
+            models[mKey] = mid;
+          }
+          modelId = mid;
+        }
+      }
+
+      var code = ServiceRepository.formatAutoCode(codePrefix, codeNumber);
+      while (await _serviceRepo.codeExists(code)) {
+        codeNumber++;
+        code = ServiceRepository.formatAutoCode(codePrefix, codeNumber);
+      }
+      codeNumber++;
+
+      await _serviceRepo.insert(ServiceItem(
+        name: name,
+        code: code,
+        categoryId: categoryId,
+        brandId: brandId,
+        modelId: modelId,
+        price: price,
+        notes: 'وارد‌شده از فایل نرخ‌نامه',
+      ));
+      servicesAdded++;
+    }
+
+    return (services: servicesAdded, brands: brandsAdded);
   }
 }
