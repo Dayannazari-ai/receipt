@@ -20,7 +20,6 @@ class PriceListImportService {
     return double.tryParse(text.replaceAll(',', ''));
   }
 
-  /// نرمال‌سازی نام فقط برای مقایسه (ی/ي، ک/ك، نیم‌فاصله، فاصله‌ی اضافی، حروف بزرگ/کوچک)
   String _norm(String s) => s
       .replaceAll('ي', 'ی')
       .replaceAll('ك', 'ک')
@@ -29,7 +28,6 @@ class PriceListImportService {
       .trim()
       .toLowerCase();
 
-  /// سرستون خودرو: «برند|مدل». اگر «|» نباشد، کل متن برند است (مثل قبل).
   (String, String?) _splitHeader(String text) {
     final i = text.indexOf('|');
     if (i < 0) return (text.trim(), null);
@@ -138,14 +136,15 @@ class PriceListImportService {
       return map;
     }
 
-    final existingServices = await _serviceRepo.getAll();
-    int counter = existingServices.length + 1;
+    final codePrefix = await _serviceRepo.autoCodePrefixForCategory(categoryId);
+    var codeNumber = (await _serviceRepo.maxAutoNumber(codePrefix)) + 1;
     int servicesAdded = 0;
 
     for (final entry in entries) {
       final (name, brandName, modelName, price) = entry;
       int? brandId;
       int? modelId;
+
       if (brandName != null) {
         final bKey = _norm(brandName);
         if (!brandIdByName.containsKey(bKey)) {
@@ -167,8 +166,13 @@ class PriceListImportService {
         }
       }
 
-      final code = 'IMP-${counter.toString().padLeft(4, '0')}';
-      counter++;
+      var code = ServiceRepository.formatAutoCode(codePrefix, codeNumber);
+      while (await _serviceRepo.codeExists(code)) {
+        codeNumber++;
+        code = ServiceRepository.formatAutoCode(codePrefix, codeNumber);
+      }
+      codeNumber++;
+
       await _serviceRepo.insert(ServiceItem(
         name: name,
         code: code,
