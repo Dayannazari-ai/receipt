@@ -26,7 +26,7 @@ class DatabaseHelper {
   // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
   // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
   // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
-  static const int dbVersion = 12;
+  static const int dbVersion = 13;
 
   Database? _db;
 
@@ -132,8 +132,10 @@ class DatabaseHelper {
     batch.execute('CREATE INDEX idx_services_category ON services(category_id)');
     batch.execute('CREATE INDEX idx_services_brand ON services(brand_id)');
     batch.execute('CREATE INDEX idx_services_code ON services(code)');
+    batch.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_services_code_unique ON services(code)');
 
     batch.execute('''
+      CREATE TABLE service_price_history (
       CREATE TABLE service_price_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         service_id INTEGER NOT NULL,
@@ -364,7 +366,29 @@ class DatabaseHelper {
 
   /// نصب موجود (کاربر قبلی): فقط ستون‌های جدید با ALTER TABLE اضافه می‌شوند.
   /// هیچ جدولی حذف یا بازسازی نمی‌شود و هیچ داده‌ای از بین نمی‌رود.
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 13) {
+      // نسخه ۱۳: یکتایی کد خدمت در خود دیتابیس. هیچ خدمت یا کدی تغییر یا حذف نمی‌شود.
+      // اگر کدهای تکراریِ قدیمی وجود نداشته باشد، index یکتا ساخته می‌شود. اگر وجود
+      // داشته باشد، ساخته نمی‌شود و به‌جایش دو trigger جلوی «ثبت یا تغییر به یک کد
+      // تکراری» را می‌گیرد، بدون دست‌زدن به داده‌ی قبلی.
+      var uniqueIndexCreated = true;
+      try {
+        await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_services_code_unique ON services(code)');
+      } catch (_) {
+        uniqueIndexCreated = false;
+      }
+      if (!uniqueIndexCreated) {
+        try {
+          await db.execute(
+              "CREATE TRIGGER IF NOT EXISTS trg_services_code_ins BEFORE INSERT ON services WHEN EXISTS (SELECT 1 FROM services WHERE code = NEW.code) BEGIN SELECT RAISE(ABORT, 'DUPLICATE_SERVICE_CODE'); END");
+        } catch (_) {}
+        try {
+          await db.execute(
+              "CREATE TRIGGER IF NOT EXISTS trg_services_code_upd BEFORE UPDATE OF code ON services WHEN NEW.code <> OLD.code AND EXISTS (SELECT 1 FROM services WHERE code = NEW.code AND id <> NEW.id) BEGIN SELECT RAISE(ABORT, 'DUPLICATE_SERVICE_CODE'); END");
+        } catch (_) {}
+      }
+    }
     if (oldVersion < 2) {
       // ستون ممکن است در نصب‌های خیلی جدید از قبل وجود داشته باشد؛
       // برای اطمینان، خطای "duplicate column" را نادیده می‌گیریم تا
