@@ -499,9 +499,10 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
   List<VehicleBrand> _brands = [];
   List<VehicleModel> _models = [];
   bool _saving = false;
+  // آخرین کدی که خودکار در فیلد گذاشته شده
+  String? _autoCode;
 
   bool get _isEdit => widget.service != null;
-
   @override
   void initState() {
     super.initState();
@@ -513,7 +514,36 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     _categoryId = s?.categoryId ?? widget.categories.first.id;
     _brandId = s?.brandId;
     _modelId = s?.modelId;
+    if (s == null) _prefillNextCode();
     _loadBrands();
+  }
+    /// کد بعدی سری هر دسته را می‌خواند و اگر کاربر هنوز چیزی ننوشته باشد در فیلد می‌گذارد.
+  Future<void> _prefillNextCode() async {
+    final code = await _serviceRepo.nextAutoCode(categoryId: _categoryId);
+    if (!mounted || _codeCtrl.text.trim().isNotEmpty) return;
+    setState(() {
+      _autoCode = code;
+      _codeCtrl.text = code;
+    });
+  }
+
+  /// با عوض شدن دسته، کد پیشنهادی به سری همان دسته می‌رود (B، M، J یا IMP).
+  /// کدی که کاربر خودش نوشته دست‌نخورده می‌ماند. در ویرایش خدمت هیچ کدی عوض نمی‌شود.
+  Future<void> _onCategoryChanged(int? v) async {
+    setState(() => _categoryId = v);
+    if (_isEdit || v == null) return;
+    bool untouched() {
+      final t = _codeCtrl.text.trim();
+      return t.isEmpty || t == _autoCode;
+    }
+
+    if (!untouched()) return;
+    final code = await _serviceRepo.nextAutoCode(categoryId: v);
+    if (!mounted || _categoryId != v || !untouched()) return;
+    setState(() {
+      _autoCode = code;
+      _codeCtrl.text = code;
+    });
   }
 
   Future<void> _loadBrands() async {
@@ -633,8 +663,13 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     setState(() => _voiceLabelCtrl.text = text);
   }
 
-  Future<void> _save() async {
-    if (_nameCtrl.text.trim().isEmpty || _codeCtrl.text.trim().isEmpty) return;
+    Future<void> _save() async {
+    if (_nameCtrl.text.trim().isEmpty) return;
+    // خدمت جدید با کد خالی: کد خودکار بعدی جایگزین می‌شود.
+    if (!_isEdit && _codeCtrl.text.trim().isEmpty) {
+      _codeCtrl.text = await _serviceRepo.nextAutoCode(categoryId: _categoryId);
+    }
+    if (_codeCtrl.text.trim().isEmpty) return;
     final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text));
     if (price == null || price < 0) return;
 
@@ -686,7 +721,11 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(_isEdit ? 'ویرایش خدمت' : 'خدمت جدید', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'نام خدمت')),
+                    TextField(
+              controller: _codeCtrl,
+              decoration: InputDecoration(
+                  labelText: 'کد خدمت',
+                  helperText: _isEdit ? null : 'اگر خالی بماند، کد خودکار ثبت می‌شود')),
           const SizedBox(height: 12),
           TextField(controller: _codeCtrl, decoration: const InputDecoration(labelText: 'کد خدمت')),
           const SizedBox(height: 12),
@@ -694,7 +733,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
             value: _categoryId,
             decoration: const InputDecoration(labelText: 'دسته‌بندی'),
             items: widget.categories.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name))).toList(),
-            onChanged: (v) => setState(() => _categoryId = v),
+            onChanged: _onCategoryChanged,
           ),
           const SizedBox(height: 12),
           ListTile(
