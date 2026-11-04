@@ -113,7 +113,12 @@ class PriceListImportService {
   Future<({int services, int brands})> importFromFile({
     required String path,
     required int categoryId,
-  }) async {
+    }) async {
+    // قبل از شروع، فعال بودن دسته‌ی مقصد را از دیتابیس چک می‌کنیم (ممکن است بعد از باز شدن صفحه بایگانی شده باشد).
+    if (!await ServiceCategoryRepository().isActive(categoryId)) {
+      throw const ServiceCategoryException(
+          'دسته‌بندی مقصد وجود ندارد یا بایگانی شده است؛ یک دسته‌بندی فعال انتخاب کنید');
+    }
     final entries = _extractEntries(path);
     if (entries.isEmpty) {
       throw StateError(
