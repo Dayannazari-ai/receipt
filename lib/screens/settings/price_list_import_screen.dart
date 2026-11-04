@@ -50,10 +50,14 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
         ],
       ),
     );
-    if (name != null && name.isNotEmpty) {
-      final id = await _categoryRepo.insert(ServiceCategory(name: name));
-      await _loadCategories();
-      setState(() => _selectedCategoryId = id);
+        if (name != null && name.isNotEmpty) {
+      try {
+        final id = await _categoryRepo.add(name);
+        await _loadCategories();
+        if (mounted) setState(() => _selectedCategoryId = id);
+      } on ServiceCategoryException catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 
@@ -151,8 +155,13 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
               onChanged: (v) => setState(() => _selectedCategoryId = v),
             ),
           ),
-          IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: _addCategory),
+                    IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: _addCategory),
         ]),
+        if (_categories.isEmpty) ...[
+          const SizedBox(height: 8),
+          const Text('هیچ دسته‌بندی فعالی وجود ندارد. با دکمه‌ی + یک دسته‌بندی بسازید؛ تا آن موقع وارد کردن نرخ‌نامه ممکن نیست.',
+              style: TextStyle(color: Colors.red, fontSize: 12)),
+        ],
         const SizedBox(height: 20),
         ElevatedButton(
           onPressed: _busy || _pathCtrl.text.isEmpty ? null : _doPreview,
