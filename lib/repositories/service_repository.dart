@@ -44,37 +44,135 @@ class ServiceCategoryRepository {
     return rows.map((r) => ServiceCategory.fromMap(r)).toList();
   }
 
-  /// هر دسته‌ی پیش‌فرض «مستقل از بقیه» ساخته می‌شود: اگر یکی موجود باشد، دسته‌های
-  /// دیگری که نیستند باز هم ساخته می‌شوند.
-  ///
-  /// یک دسته‌ی پیش‌فرض ساخته نمی‌شود اگر:
-  ///  - دسته‌ای با همان نام (با نرمال‌سازی ی/ي، ک/ك، نیم‌فاصله و فاصله‌ی اضافی) وجود دارد، یا
-  ///  - دسته‌ای هم‌سری با آن وجود دارد (مثلاً دسته‌ی «برق» برای «برق خودرو»)، تا دسته‌ی تکراری ساخته نشود.
-  /// دسته‌هایی که قبلاً «حذف منطقی» شده‌اند هم موجود حساب می‌شوند؛ پس دسته‌ای که
-  /// کاربر عمداً حذف کرده با هر بار باز شدن برنامه دوباره ساخته نمی‌شود.
-  /// هیچ دسته‌ی موجودی تغییر یا حذف نمی‌شود. کل کار داخل یک تراکنش است.
+  /// کلید علامتِ «دسته‌های پیش‌فرض یک‌بار ساخته شده‌اند» در جدول settings.
+  static const String _seedFlagKey = 'service_categories_defaults_seeded';
+
+  /// دسته‌های پیش‌فرض را فقط «یک‌بار در عمر هر دیتابیس» می‌سازد (کل کار در یک تراکنش):
+  ///  - اگر علامت قبلاً ثبت شده باشد، هیچ کاری نمی‌کند؛ پس دسته‌ای که کاربر
+  ///    حذف، بایگانی یا تغییر نام داده، هرگز دوباره ساخته نمی‌شود.
+  ///  - اگر جدول service_categories کاملاً خالی باشد، سه دسته‌ی پیش‌فرض ساخته می‌شوند.
+  ///  - اگر حتی یک ردیف وجود داشته باشد (نصب‌های قبلی)، چیزی ساخته نمی‌شود.
+  ///  - در هر دو حالت علامت ثبت می‌شود.
+  /// هیچ دسته‌ی موجودی تغییر یا حذف نمی‌شود. ستون یا جدول جدیدی لازم نیست.
   Future<void> ensureDefaults() async {
     final db = await _db.database;
     await db.transaction((txn) async {
-      final rows = await txn.query('service_categories', columns: ['name']);
-      final names = <String>{};
-      final series = <String>{};
-      for (final r in rows) {
-        final name = (r['name'] as String?) ?? '';
-        names.add(ServiceRepository.normalizeName(name));
-        series.add(ServiceRepository.seriesPrefixForName(name));
+      final flag = await txn.query('settings', where: 'key = ?', whereArgs: [_seedFlagKey], limit: 1);
+      if (flag.isNotEmpty) return;
+      final any = await txn.query('service_categories', columns: ['id'], limit: 1);
+      if (any.isEmpty) {
+        for (final name in defaultNames) {
+          await txn.insert('service_categories', {'name': name, 'is_deleted': 0});
+        }
       }
-      for (final name in defaultNames) {
-        final key = ServiceRepository.normalizeName(name);
-        final prefix = ServiceRepository.seriesPrefixForName(name);
-        final present = names.contains(key) ||
-            (prefix != ServiceRepository.defaultSeriesPrefix && series.contains(prefix));
-        if (present) continue;
-        await txn.insert('service_categories', {'name': name, 'is_deleted': 0});
-        names.add(key);
-        series.add(prefix);
-      }
+      await txn.insert('settings', {'key': _seedFlagKey, 'value': '1'},
+          conflictAlgorithm: ConflictAlgorithm.replace);
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // مدیریت دسته‌بندی‌ها: افزودن، تغییر نام، حذف/بایگانی، بازیابی
+  // «بایگانی» همان is_deleted = 1 است؛ ردیف دسته و همه‌ی خدمات و سوابق آن
+  // دست‌نخورده می‌ماند و فقط از فهرست‌های عادی پنهان می‌شود.
+  // ---------------------------------------------------------------------
+
+  /// آیا در بین دسته‌های «فعال» نامی هم‌ارز [name] هست؟ (ی/ي، ک/ك، نیم‌فاصله و فاصله‌ی اضافی نادیده گرفته می‌شود)
+  Future<bool> _activeNameTaken(DatabaseExecutor ex, String name, {int? excludeId}) async {
+    final key = ServiceRepository.normalizeName(name).toLowerCase();
+    final rows = await ex.query('service_categories', columns: ['id', 'name'], where: 'is_deleted = 0');
+    for (final r in rows) {
+      if (excludeId != null && (r['id'] as num).toInt() == excludeId) continue;
+      if (ServiceRepository.normalizeName((r['name'] as String?) ?? '').toLowerCase() == key) return true;
+    }
+    return false;
+  }
+
+  /// افزودن دسته‌ی جدید. نام خالی یا تکراریِ دسته‌های فعال رد می‌شود
+  /// ([ServiceCategoryException]).
+  Future<int> add(String name) async {
+    final clean = name.trim();
+    if (clean.isEmpty) throw const ServiceCategoryException('نام دسته‌بندی نباید خالی باشد');
+    final db = await _db.database;
+    return db.transaction((txn) async {
+      if (await _activeNameTaken(txn, clean)) {
+        throw ServiceCategoryException('دسته‌بندی «$clean» از قبل وجود دارد');
+      }
+      return txn.insert('service_categories', {'name': clean, 'is_deleted': 0});
+    });
+  }
+
+  /// تغییر نام یک دسته‌ی فعال. فقط ستون name عوض می‌شود؛ خدمات، قیمت‌ها و فاکتورها
+  /// و کدهای قبلی خدمات تغییر نمی‌کنند.
+  Future<void> rename(int id, String newName) async {
+    final clean = newName.trim();
+    if (clean.isEmpty) throw const ServiceCategoryException('نام دسته‌بندی نباید خالی باشد');
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      if (await _activeNameTaken(txn, clean, excludeId: id)) {
+        throw ServiceCategoryException('دسته‌بندی «$clean» از قبل وجود دارد');
+      }
+      await txn.update('service_categories', {'name': clean},
+          where: 'id = ? AND is_deleted = 0', whereArgs: [id]);
+    });
+  }
+
+  /// تعداد همه‌ی خدمات وابسته به این دسته، «حتی خدمات حذف‌شده» (is_deleted = 1)؛
+  /// وجود هر خدمتی یعنی دسته سابقه دارد.
+  Future<int> serviceCount(int categoryId) async {
+    final db = await _db.database;
+    final r = await db.rawQuery('SELECT COUNT(*) FROM services WHERE category_id = ?', [categoryId]);
+    return Sqflite.firstIntValue(r) ?? 0;
+  }
+
+  /// حذف یا بایگانی (با تأیید کاربر در صفحه، قبل از صدا زدن این متد):
+  ///  - هیچ خدمتی وابسته نیست: حذف قطعی ردیف دسته.
+  ///  - حتی یک خدمت وابسته است: فقط is_deleted = 1 (بایگانی)؛ هیچ ردیف دیگری لمس نمی‌شود.
+  /// شمارش و عملیات در یک تراکنش است، پس بین شمارش و حذف خدمتی اضافه نمی‌شود.
+  Future<CategoryRemoval> removeOrArchive(int id) async {
+    final db = await _db.database;
+    return db.transaction((txn) async {
+      final r = await txn.rawQuery('SELECT COUNT(*) FROM services WHERE category_id = ?', [id]);
+      final n = Sqflite.firstIntValue(r) ?? 0;
+      if (n == 0) {
+        await txn.delete('service_categories', where: 'id = ?', whereArgs: [id]);
+        return CategoryRemoval.deleted;
+      }
+      await txn.update('service_categories', {'is_deleted': 1}, where: 'id = ?', whereArgs: [id]);
+      return CategoryRemoval.archived;
+    });
+  }
+
+  /// دسته‌های بایگانی‌شده.
+  Future<List<ServiceCategory>> getArchived() async {
+    final db = await _db.database;
+    final rows = await db.query('service_categories', where: 'is_deleted = 1', orderBy: 'name');
+    return rows.map((r) => ServiceCategory.fromMap(r)).toList();
+  }
+
+  /// بازیابی یک دسته‌ی بایگانی‌شده: فقط is_deleted دوباره ۰ می‌شود. اگر هم‌اکنون
+  /// دسته‌ی فعالی با همان نام وجود داشته باشد، بازیابی رد می‌شود ([ServiceCategoryException]).
+  Future<void> restore(int id) async {
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      final rows = await txn.query('service_categories',
+          columns: ['name'], where: 'id = ?', whereArgs: [id], limit: 1);
+      if (rows.isEmpty) throw const ServiceCategoryException('این دسته‌بندی پیدا نشد');
+      final name = (rows.first['name'] as String?) ?? '';
+      if (await _activeNameTaken(txn, name, excludeId: id)) {
+        throw ServiceCategoryException(
+            'بازیابی ممکن نیست: یک دسته‌بندی فعال با نام «$name» وجود دارد. '
+            'ابتدا نام آن را تغییر دهید یا آن را حذف کنید.');
+      }
+      await txn.update('service_categories', {'is_deleted': 0}, where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  /// آیا این دسته وجود دارد و فعال (بایگانی‌نشده) است؟
+  Future<bool> isActive(int id) async {
+    final db = await _db.database;
+    final rows = await db.query('service_categories',
+        columns: ['id'], where: 'id = ? AND is_deleted = 0', whereArgs: [id], limit: 1);
+    return rows.isNotEmpty;
   }
 }
 
