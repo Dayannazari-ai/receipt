@@ -144,10 +144,24 @@ class _ServicesScreenState extends State<ServicesScreen> {
         ],
       ),
     );
-    if (name != null && name.isNotEmpty) {
-      await _categoryRepo.insert(ServiceCategory(name: name));
-      _load();
+        if (name != null && name.isNotEmpty) {
+      try {
+        await _categoryRepo.add(name);
+      } on ServiceCategoryException catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+      await _load();
     }
+  }
+
+    /// مدیریت دسته‌بندی‌ها (تغییر نام، حذف/بایگانی، بازیابی). بعد از بسته شدن، فهرست خدمات تازه می‌شود.
+  Future<void> _openCategoryManager() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _CategoryManagerSheet(),
+    );
+    if (mounted) _load();
   }
 
   Future<void> _addOrEditService({ServiceItem? service}) async {
@@ -365,7 +379,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
           tooltip: 'انتخاب گروهی',
           onPressed: () => _enterSelection(null),
         ),
-        IconButton(icon: const Icon(Icons.create_new_folder_outlined), onPressed: _addCategory),
+                IconButton(
+            icon: const Icon(Icons.create_new_folder_outlined),
+            tooltip: 'مدیریت دسته‌بندی‌ها',
+            onPressed: _openCategoryManager),
       ]),
       body: Column(children: [
         Padding(
@@ -966,6 +983,199 @@ class _PickerSheetState extends State<_PickerSheet> {
             ),
           ),
         ]),
+      ),
+    );
+  }
+}
+
+/// مدیریت دسته‌بندی‌ها: افزودن، تغییر نام، حذف/بایگانی و بازیابی.
+/// فقط با ServiceCategoryRepository کار می‌کند و به خدمات، قیمت‌ها و فاکتورها دست نمی‌زند.
+class _CategoryManagerSheet extends StatefulWidget {
+  const _CategoryManagerSheet();
+  @override
+  State<_CategoryManagerSheet> createState() => _CategoryManagerSheetState();
+}
+
+class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
+  final _repo = ServiceCategoryRepository();
+  List<ServiceCategory> _active = [];
+  List<ServiceCategory> _archived = [];
+  Map<int, int> _counts = {};
+  bool _loading = true;
+  String? _notice;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final active = await _repo.getAll();
+    final archived = await _repo.getArchived();
+    final counts = <int, int>{};
+    for (final c in active) {
+      if (c.id != null) counts[c.id!] = await _repo.serviceCount(c.id!);
+    }
+    if (!mounted) return;
+    setState(() {
+      _active = active;
+      _archived = archived;
+      _counts = counts;
+      _loading = false;
+    });
+  }
+
+  Future<void> _showError(Object e) async {
+    final msg = e is ServiceCategoryException ? e.message : 'خطا: $e';
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: Text(msg),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('باشه'))],
+      ),
+    );
+  }
+
+  Future<String?> _askName(String title, String initial, String okLabel) {
+    final ctrl = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+            controller: ctrl, autofocus: true, decoration: const InputDecoration(labelText: 'نام دسته‌بندی')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: Text(okLabel)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _add() async {
+    final name = await _askName('دسته‌بندی جدید', '', 'افزودن');
+    if (name == null || name.isEmpty) return;
+    try {
+      await _repo.add(name);
+      _notice = 'دسته‌بندی «$name» اضافه شد';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _rename(ServiceCategory c) async {
+    final name = await _askName('تغییر نام دسته‌بندی', c.name, 'ذخیره');
+    if (name == null || name.isEmpty || name == c.name) return;
+    try {
+      await _repo.rename(c.id!, name);
+      _notice = 'نام تغییر کرد. کدهای قبلی خدمات عوض نمی‌شوند؛ کد خدمات جدید بر اساس نام تازه ساخته می‌شود.';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _remove(ServiceCategory c) async {
+    final n = await _repo.serviceCount(c.id!);
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(n == 0 ? 'حذف دسته‌بندی' : 'بایگانی دسته‌بندی'),
+        content: Text(n == 0
+            ? 'دسته‌بندی «${c.name}» هیچ خدمتی ندارد و برای همیشه حذف می‌شود. ادامه می‌دهید؟'
+            : 'دسته‌بندی «${c.name}» دارای $n خدمت ثبت‌شده است (فعال یا حذف‌شده) و حذف قطعی نمی‌شود، بلکه بایگانی می‌شود.\n'
+                'از فهرست‌ها و ثبت خدمت جدید پنهان می‌شود ولی خدمات، قیمت‌ها و فاکتورهای قبلی دست‌نخورده می‌مانند. '
+                'هر وقت خواستید از بخش «بایگانی» بازیابی‌اش کنید. ادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(n == 0 ? 'حذف' : 'بایگانی', style: const TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final r = await _repo.removeOrArchive(c.id!);
+      _notice = r == CategoryRemoval.deleted ? 'دسته‌بندی حذف شد' : 'دسته‌بندی بایگانی شد';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _restore(ServiceCategory c) async {
+    try {
+      await _repo.restore(c.id!);
+      _notice = 'دسته‌بندی «${c.name}» بازیابی شد';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.8,
+      expand: false,
+      builder: (context, scrollController) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('مدیریت دسته‌بندی‌ها', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  TextButton.icon(
+                      icon: const Icon(Icons.add, size: 18), label: const Text('دسته‌بندی جدید'), onPressed: _add),
+                ]),
+                if (_notice != null) ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(_notice!, style: const TextStyle(fontSize: 12, color: Colors.green)),
+                  ),
+                ],
+                const Divider(),
+                Expanded(
+                  child: ListView(controller: scrollController, children: [
+                    if (_active.isEmpty)
+                      const Padding(padding: EdgeInsets.all(12), child: Text('دسته‌بندی فعالی وجود ندارد')),
+                    ..._active.map((c) => ListTile(
+                          title: Text(c.name),
+                          subtitle: Text('${_counts[c.id] ?? 0} خدمت', style: const TextStyle(fontSize: 12)),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (v) {
+                              if (v == 'rename') {
+                                _rename(c);
+                              } else {
+                                _remove(c);
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(value: 'rename', child: Text('تغییر نام')),
+                              PopupMenuItem(
+                                  value: 'remove', child: Text('حذف / بایگانی', style: TextStyle(color: Colors.red))),
+                            ],
+                          ),
+                        )),
+                    if (_archived.isNotEmpty)
+                      ExpansionTile(
+                        title: Text('دسته‌های بایگانی‌شده (${_archived.length})'),
+                        children: _archived
+                            .map((c) => ListTile(
+                                  title: Text(c.name),
+                                  trailing: TextButton(onPressed: () => _restore(c), child: const Text('بازیابی')),
+                                ))
+                            .toList(),
+                      ),
+                  ]),
+                ),
+              ]),
       ),
     );
   }
