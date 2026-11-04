@@ -15,6 +15,18 @@ class DuplicateServiceCodeException implements Exception {
   String toString() => message;
 }
 
+/// خطای قابل‌فهم برای کاربر در مدیریت دسته‌بندی‌ها (نام خالی، نام تکرار، بازیابی ناممکن، ...).
+class ServiceCategoryException implements Exception {
+  final String message;
+  const ServiceCategoryException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+/// نتیجه‌ی حذف یک دسته‌بندی: حذف قطعی (بدون سابقه) یا بایگانی (دارای خدمت).
+enum CategoryRemoval { deleted, archived }
+
 class ServiceCategoryRepository {
   final _db = DatabaseHelper.instance;
 
