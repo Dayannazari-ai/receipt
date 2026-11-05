@@ -680,42 +680,77 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     setState(() => _voiceLabelCtrl.text = text);
   }
 
-    Future<void> _save() async {
-    if (_nameCtrl.text.trim().isEmpty) return;
-    // خدمت جدید با کد خالی: کد خودکار بعدی جایگزین می‌شود.
-    if (!_isEdit && _codeCtrl.text.trim().isEmpty) {
-      _codeCtrl.text = await _serviceRepo.nextAutoCode(categoryId: _categoryId);
-    }
-    if (_codeCtrl.text.trim().isEmpty) return;
-    final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text));
-    if (price == null || price < 0) return;
-
-    final codeExists = await _serviceRepo.codeExists(_codeCtrl.text.trim(), excludeId: widget.service?.id);
-    if (codeExists) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('این کد قبلاً استفاده شده است')));
-      }
-      return;
-    }
-
-    setState(() => _saving = true);
-    final newItem = ServiceItem(
-      id: widget.service?.id,
-      name: _nameCtrl.text.trim(),
-      code: _codeCtrl.text.trim(),
-      categoryId: _categoryId!,
-      brandId: _brandId,
-      modelId: _modelId,
-      price: price,
-      voiceSearchLabel: _voiceLabelCtrl.text.trim().isEmpty ? null : _voiceLabelCtrl.text.trim(),
+      /// پیام خطا وسط صفحه. چون داخل خود برگه نمایش داده می‌شود، زیر آن پنهان نمی‌ماند.
+  Future<void> _showError(String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ثبت انجام نشد'),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('باشه'))],
+      ),
     );
-    
-    if (_isEdit) {
-      await _serviceRepo.update(widget.service!, newItem);
-    } else {
-      await _serviceRepo.insert(newItem);
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    try {
+      if (_nameCtrl.text.trim().isEmpty) {
+        await _showError('نام خدمت را وارد کنید.');
+        return;
+      }
+      // خدمت جدید با کد خالی: کد پیشنهادی سیستم جایگزین می‌شود.
+      if (!_isEdit && _codeCtrl.text.trim().isEmpty) {
+        _codeCtrl.text = await _serviceRepo.nextAutoCode(categoryId: _categoryId);
+      }
+      final code = _codeCtrl.text.trim();
+      if (code.isEmpty) {
+        await _showError('کد خدمت خالی است.');
+        return;
+      }
+      final price = double.tryParse(ThousandsInputFormatter.unformat(_priceCtrl.text));
+      if (price == null || price < 0) {
+        await _showError('قیمت را درست وارد کنید.');
+        return;
+      }
+      if (_categoryId == null) {
+        await _showError('دسته‌بندی را انتخاب کنید.');
+        return;
+      }
+      // در ویرایش، فقط اگر کد عوض شده باشد تکراری‌بودن بررسی می‌شود.
+      final codeChanged = !_isEdit || code != widget.service!.code.trim();
+      if (codeChanged && await _serviceRepo.codeExists(code, excludeId: widget.service?.id)) {
+        await _showError('کد «$code» تکراری است و قبلاً برای خدمت دیگری ثبت شده؛ کد دیگری انتخاب کنید.');
+        return;
+      }
+
+      setState(() => _saving = true);
+      final newItem = ServiceItem(
+        id: widget.service?.id,
+        name: _nameCtrl.text.trim(),
+        code: code,
+        categoryId: _categoryId!,
+        brandId: _brandId,
+        modelId: _modelId,
+        price: price,
+        voiceSearchLabel: _voiceLabelCtrl.text.trim().isEmpty ? null : _voiceLabelCtrl.text.trim(),
+      );
+      if (_isEdit) {
+        await _serviceRepo.update(widget.service!, newItem);
+      } else {
+        await _serviceRepo.insert(newItem);
+      }
+      if (mounted) Navigator.pop(context, true);
+    } on DuplicateServiceCodeException catch (e) {
+      await _showError('کد «${e.code}» تکراری است و همزمان برای خدمت دیگری گرفته شده؛ کد دیگری انتخاب کنید.');
+    } on ServiceCategoryException catch (e) {
+      await _showError(e.message);
+    } catch (e) {
+      await _showError('ثبت انجام نشد. دلیل فنی: $e');
+    } finally {
+      if (mounted && _saving) setState(() => _saving = false);
     }
-    if (mounted) Navigator.pop(context, true);
   }
 
   String _brandLabel() {
