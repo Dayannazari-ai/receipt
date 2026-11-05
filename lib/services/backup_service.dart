@@ -646,6 +646,17 @@ class BackupService {
       if (matchedId != null) {
         if (oldId != null) categoryIdMap[oldId] = matchedId;
       } else {
+                // پیشوند کد باید در کل دسته‌ها یکتا بماند؛ اگر این دستگاه قبلاً آن را به دسته‌ی دیگری داده، خالی می‌ماند.
+        final bp = (cat['code_prefix'] as String?)?.trim() ?? '';
+        if (bp.isNotEmpty) {
+          final clash = await txn.query('service_categories',
+              columns: ['id'], where: 'code_prefix = ? COLLATE NOCASE', whereArgs: [bp], limit: 1);
+          if (clash.isNotEmpty) {
+            cat['code_prefix'] = null;
+            report.notes.add('پیشوند «$bp» برای دسته‌ی «$name» قبلاً برای دسته‌ی دیگری ثبت شده بود؛ '
+                'پیشوند این دسته خالی ماند. در «مدیریت دسته‌بندی‌ها» پیشوند جدید تعیین کنید.');
+          }
+        }
         final newId = await _insertRaw(txn, 'service_categories', cat);
         if (oldId != null) categoryIdMap[oldId] = newId;
       }
