@@ -1,21 +1,22 @@
 import 'package:sqflite/sqflite.dart';
 import '../database/database_helper.dart';
 import '../models/service.dart';
+import 'service_code_manager.dart';
 
-/// وقتی کد خدمت از قبل برای خدمت دیگری (فعال یا حذف‌شده) ثبت شده باشد.
+/// وقتی کد خدمت از قبل برای خدمت دیگری ثبت شده و قابل بازاستفاده نباشد.
 /// هم از بررسی داخل برنامه و هم از قید یکتایی خود دیتابیس پرتاب می‌شود.
 class DuplicateServiceCodeException implements Exception {
   final String code;
   const DuplicateServiceCodeException(this.code);
 
   String get message =>
-      'کد «$code» قبلاً برای یک خدمت (فعال یا حذف‌شده) ثبت شده است؛ کد دیگری انتخاب کنید';
+      'کد «$code» قبلاً برای یک خدمت ثبت شده است؛ کد دیگری انتخاب کنید';
 
   @override
   String toString() => message;
 }
 
-/// خطای قابل‌فهم برای کاربر در مدیریت دسته‌بندی‌ها (نام خالی، نام تکرار، بازیابی ناممکن، ...).
+/// خطای قابل‌فهم برای کاربر در مدیریت دسته‌بندی‌ها (نام خالی، نام تکرار، پیشوند نامعتبر، ...).
 class ServiceCategoryException implements Exception {
   final String message;
   const ServiceCategoryException(this.message);
@@ -33,6 +34,9 @@ class ServiceCategoryRepository {
   /// دسته‌های پیش‌فرض برنامه.
   static const List<String> defaultNames = ['برق خودرو', 'مکانیک', 'جلوبندی'];
 
+  /// پیشوند دسته‌های پیش‌فرض، فقط هنگام ساخت اولیه‌ی یک دیتابیس تازه.
+  static const Map<String, String> _defaultPrefixes = {'برق خودرو': 'B', 'مکانیک': 'M', 'جلوبندی': 'J'};
+
   Future<int> insert(ServiceCategory c) async {
     final db = await _db.database;
     return db.insert('service_categories', c.toMap()..remove('id'));
@@ -48,12 +52,10 @@ class ServiceCategoryRepository {
   static const String _seedFlagKey = 'service_categories_defaults_seeded';
 
   /// دسته‌های پیش‌فرض را فقط «یک‌بار در عمر هر دیتابیس» می‌سازد (کل کار در یک تراکنش):
-  ///  - اگر علامت قبلاً ثبت شده باشد، هیچ کاری نمی‌کند؛ پس دسته‌ای که کاربر
-  ///    حذف، بایگانی یا تغییر نام داده، هرگز دوباره ساخته نمی‌شود.
-  ///  - اگر جدول service_categories کاملاً خالی باشد، سه دسته‌ی پیش‌فرض ساخته می‌شوند.
+  ///  - اگر علامت قبلاً ثبت شده باشد، هیچ کاری نمی‌کند.
+  ///  - اگر جدول service_categories کاملاً خالی باشد، سه دسته‌ی پیش‌فرض (با پیشوندشان) ساخته می‌شوند.
   ///  - اگر حتی یک ردیف وجود داشته باشد (نصب‌های قبلی)، چیزی ساخته نمی‌شود.
   ///  - در هر دو حالت علامت ثبت می‌شود.
-  /// هیچ دسته‌ی موجودی تغییر یا حذف نمی‌شود. ستون یا جدول جدیدی لازم نیست.
   Future<void> ensureDefaults() async {
     final db = await _db.database;
     await db.transaction((txn) async {
@@ -62,7 +64,8 @@ class ServiceCategoryRepository {
       final any = await txn.query('service_categories', columns: ['id'], limit: 1);
       if (any.isEmpty) {
         for (final name in defaultNames) {
-          await txn.insert('service_categories', {'name': name, 'is_deleted': 0});
+          await txn.insert('service_categories',
+              {'name': name, 'code_prefix': _defaultPrefixes[name], 'is_deleted': 0});
         }
       }
       await txn.insert('settings', {'key': _seedFlagKey, 'value': '1'},
@@ -87,22 +90,89 @@ class ServiceCategoryRepository {
     return false;
   }
 
-  /// افزودن دسته‌ی جدید. نام خالی یا تکراریِ دسته‌های فعال رد می‌شود
-  /// ([ServiceCategoryException]).
-  Future<int> add(String name) async {
+  // ---------------------------------------------------------------------
+  // پیشوند کد خدمات هر دسته (ستون code_prefix، بدون خط تیره؛ مثلاً B یا PDR)
+  // ---------------------------------------------------------------------
+
+  static final RegExp _prefixPattern = RegExp(r'^[A-Za-z][A-Za-z0-9]{0,4}$');
+
+  /// پیشوند را اعتبارسنجی و بزرگ‌حرف می‌کند: ۱ تا ۵ نویسه‌ی لاتین/رقم، شروع با حرف.
+  /// خط تیره‌ی آخر را خود برنامه هنگام ساخت کد می‌گذارد.
+  static String cleanPrefix(String raw) {
+    final p = raw.trim().replaceAll(RegExp(r'-+$'), '').toUpperCase();
+    if (!_prefixPattern.hasMatch(p)) {
+      throw const ServiceCategoryException(
+          'پیشوند باید ۱ تا ۵ نویسه‌ی لاتین (حرف یا رقم) باشد و با حرف شروع شود؛ مثل PDR');
+    }
+    return p;
+  }
+
+  /// آیا این پیشوند برای دسته‌ی دیگری (فعال یا بایگانی‌شده) ثبت شده است؟
+  Future<bool> _prefixTaken(DatabaseExecutor ex, String prefix, {int? excludeId}) async {
+    final rows = await ex.query('service_categories',
+        columns: ['id'],
+        where: excludeId == null ? 'code_prefix = ? COLLATE NOCASE' : 'code_prefix = ? COLLATE NOCASE AND id != ?',
+        whereArgs: excludeId == null ? [prefix] : [prefix, excludeId],
+        limit: 1);
+    return rows.isNotEmpty;
+  }
+
+  /// پیشوند ثبت‌شده‌ی یک دسته (بدون خط تیره) یا null.
+  Future<String?> getPrefix(int id) async {
+    final db = await _db.database;
+    final rows = await db.query('service_categories',
+        columns: ['code_prefix'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return null;
+    final p = (rows.first['code_prefix'] as String?)?.trim() ?? '';
+    return p.isEmpty ? null : p;
+  }
+
+  /// تعیین یا تغییر پیشوند. فقط وقتی مجاز است که دسته هنوز پیشوند نداشته باشد
+  /// یا هیچ خدمتی نداشته باشد. پیشوند باید در کل دسته‌ها یکتا باشد.
+  Future<void> setPrefix(int id, String prefix) async {
+    final p = cleanPrefix(prefix);
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      final rows = await txn.query('service_categories',
+          columns: ['code_prefix'], where: 'id = ?', whereArgs: [id], limit: 1);
+      if (rows.isEmpty) throw const ServiceCategoryException('این دسته‌بندی پیدا نشد');
+      final current = (rows.first['code_prefix'] as String?)?.trim() ?? '';
+      if (current.toUpperCase() == p) return;
+      if (current.isNotEmpty) {
+        final n = Sqflite.firstIntValue(
+                await txn.rawQuery('SELECT COUNT(*) FROM services WHERE category_id = ?', [id])) ??
+            0;
+        if (n > 0) {
+          throw const ServiceCategoryException('این دسته‌بندی خدمت ثبت‌شده دارد و پیشوندش تغییر نمی‌کند');
+        }
+      }
+      if (await _prefixTaken(txn, p, excludeId: id)) {
+        throw ServiceCategoryException('پیشوند «$p» قبلاً برای دسته‌بندی دیگری ثبت شده است');
+      }
+      await txn.update('service_categories', {'code_prefix': p}, where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  /// افزودن دسته‌ی جدید. نام خالی یا تکراریِ دسته‌های فعال رد می‌شود. اگر [prefix] داده شود،
+  /// اعتبارسنجی و یکتایی آن هم در همین تراکنش انجام می‌شود ([ServiceCategoryException]).
+  Future<int> add(String name, {String? prefix}) async {
     final clean = name.trim();
     if (clean.isEmpty) throw const ServiceCategoryException('نام دسته‌بندی نباید خالی باشد');
+    final p = (prefix == null || prefix.trim().isEmpty) ? null : cleanPrefix(prefix);
     final db = await _db.database;
     return db.transaction((txn) async {
       if (await _activeNameTaken(txn, clean)) {
         throw ServiceCategoryException('دسته‌بندی «$clean» از قبل وجود دارد');
       }
-      return txn.insert('service_categories', {'name': clean, 'is_deleted': 0});
+      if (p != null && await _prefixTaken(txn, p)) {
+        throw ServiceCategoryException('پیشوند «$p» قبلاً برای دسته‌بندی دیگری ثبت شده است');
+      }
+      return txn.insert('service_categories', {'name': clean, 'code_prefix': p, 'is_deleted': 0});
     });
   }
 
-  /// تغییر نام یک دسته‌ی فعال. فقط ستون name عوض می‌شود؛ خدمات، قیمت‌ها و فاکتورها
-  /// و کدهای قبلی خدمات تغییر نمی‌کنند.
+  /// تغییر نام یک دسته‌ی فعال. فقط ستون name عوض می‌شود؛ پیشوند، خدمات، قیمت‌ها،
+  /// فاکتورها و کدهای قبلی تغییر نمی‌کنند.
   Future<void> rename(int id, String newName) async {
     final clean = newName.trim();
     if (clean.isEmpty) throw const ServiceCategoryException('نام دسته‌بندی نباید خالی باشد');
@@ -127,7 +197,6 @@ class ServiceCategoryRepository {
   /// حذف یا بایگانی (با تأیید کاربر در صفحه، قبل از صدا زدن این متد):
   ///  - هیچ خدمتی وابسته نیست: حذف قطعی ردیف دسته.
   ///  - حتی یک خدمت وابسته است: فقط is_deleted = 1 (بایگانی)؛ هیچ ردیف دیگری لمس نمی‌شود.
-  /// شمارش و عملیات در یک تراکنش است، پس بین شمارش و حذف خدمتی اضافه نمی‌شود.
   Future<CategoryRemoval> removeOrArchive(int id) async {
     final db = await _db.database;
     return db.transaction((txn) async {
@@ -182,31 +251,21 @@ class ServiceRepository {
   // ---------------------------------------------------------------------
   // کد یکتا
   // ---------------------------------------------------------------------
-  // کد خدمت باید در کل جدول یکتا باشد، «شامل خدمات حذف‌شده» (حذف نرم فقط
-  // is_deleted را ۱ می‌کند و ردیف می‌ماند؛ پس کد آن هرگز آزاد نمی‌شود).
-  // دو لایه: ۱) بررسی داخل همین تراکنش، ۲) قید دیتابیس (index یکتا یا trigger،
-  // به migration نسخه‌ی ۱۳ در database_helper نگاه کنید).
+  // یکتایی در ServiceCodeManager.ensureFree (داخل همین تراکنش‌ها) کنترل می‌شود.
+  // کد خدمت حذف‌شده‌ای که در هیچ فاکتوری نیامده آزاد و قابل بازاستفاده است.
+  // لایه‌ی دوم: قید دیتابیس (index یکتا یا trigger، migration نسخه‌ی ۱۳).
 
   static bool _isDuplicateCodeError(DatabaseException e) =>
       e.isUniqueConstraintError() || e.toString().contains('DUPLICATE_SERVICE_CODE');
 
-  Future<bool> _codeTaken(DatabaseExecutor ex, String code, {int? excludeId}) async {
-    final rows = await ex.query('services',
-        columns: ['id'],
-        where: excludeId == null ? 'code = ?' : 'code = ? AND id != ?',
-        whereArgs: excludeId == null ? [code] : [code, excludeId],
-        limit: 1);
-    return rows.isNotEmpty;
-  }
-
-  /// ثبت خدمت جدید. اگر کد تکراری باشد (حتی کدِ یک خدمت حذف‌شده)،
-  /// [DuplicateServiceCodeException] پرتاب می‌شود و چیزی ثبت نمی‌شود.
+  /// ثبت خدمت جدید. اگر کد تکراری باشد، [DuplicateServiceCodeException] پرتاب
+  /// می‌شود و چیزی ثبت نمی‌شود.
   Future<int> insert(ServiceItem s) async {
     final db = await _db.database;
     final code = s.code.trim();
     try {
       return await db.transaction((txn) async {
-        if (await _codeTaken(txn, code)) throw DuplicateServiceCodeException(code);
+        await ServiceCodeManager.ensureFree(txn, code);
         final map = s.toMap()
           ..remove('id')
           ..['code'] = code;
@@ -219,10 +278,9 @@ class ServiceRepository {
   }
 
   /// ویرایش خدمت. اگر قیمت تغییر کرده باشد، در تاریخچه ثبت می‌شود (سوابق قبلی هرگز
-  /// حذف نمی‌شوند). قیمت قبلی از خود دیتابیس خوانده می‌شود، نه از شیء احتمالاً
-  /// قدیمیِ صفحه، تا تاریخچه همیشه درست باشد. اگر کد عوض شده و تکراری باشد،
-  /// [DuplicateServiceCodeException] پرتاب می‌شود. اگر کد تغییری نکرده، بررسی
-  /// تکراری انجام نمی‌شود (ویرایش قیمت و نام یک خدمتِ قدیمی هیچ‌وقت به‌خاطر کد گیر نمی‌کند).
+  /// حذف نمی‌شوند). قیمت قبلی از خود دیتابیس خوانده می‌شود. اگر کد عوض شده و تکراری
+  /// باشد، [DuplicateServiceCodeException] پرتاب می‌شود. اگر کد تغییری نکرده، بررسی
+  /// تکراری انجام نمی‌شود.
   Future<void> update(ServiceItem oldItem, ServiceItem newItem) async {
     final db = await _db.database;
     final code = newItem.code.trim();
@@ -233,12 +291,10 @@ class ServiceRepository {
         final currentCode = cur.isEmpty ? null : cur.first['code'] as String?;
         final oldPrice = cur.isEmpty ? oldItem.price : (cur.first['price'] as num).toDouble();
 
-        if (currentCode != code && await _codeTaken(txn, code, excludeId: newItem.id)) {
-          throw DuplicateServiceCodeException(code);
+        if (currentCode != code) {
+          await ServiceCodeManager.ensureFree(txn, code, excludeId: newItem.id);
         }
-        // is_deleted عمداً نوشته نمی‌شود: وضعیت حذف فقط با softDelete/softDeleteMany
-        // عوض می‌شود. وگرنه ذخیره‌ی یک ویرایشِ قدیمی (که isDeleted پیش‌فرض ۰ دارد)
-        // خدمتِ حذف‌شده را بی‌صدا برمی‌گرداند.
+        // is_deleted عمداً نوشته نمی‌شود: وضعیت حذف فقط با softDelete/softDeleteMany عوض می‌شود.
         final map = newItem.toMap()
           ..['code'] = code
           ..remove('is_deleted');
@@ -259,15 +315,13 @@ class ServiceRepository {
   }
 
   /// حذف نرم تکی: فقط ستون is_deleted همین خدمت ۱ می‌شود. به فاکتورها، اقلام
-  /// فاکتور و تاریخچه‌ی قیمت دست نمی‌زند، و کد خدمت همچنان رزرو می‌ماند.
+  /// فاکتور و تاریخچه‌ی قیمت دست نمی‌زند.
   Future<int> softDelete(int id) async {
     final db = await _db.database;
     return db.update('services', {'is_deleted': 1}, where: 'id = ?', whereArgs: [id]);
   }
 
-  /// حذف نرم گروهی: فقط ستون is_deleted همین خدمات ۱ می‌شود (مثل حذف تکی).
-  /// به جدول فاکتورها و اقلام آن‌ها و تاریخچه قیمت دست نمی‌زند.
-  /// همه در یک تراکنش انجام می‌شود: یا همه حذف می‌شوند یا هیچ‌کدام.
+  /// حذف نرم گروهی (مثل حذف تکی)، همه در یک تراکنش.
   Future<int> softDeleteMany(List<int> ids) async {
     if (ids.isEmpty) return 0;
     final db = await _db.database;
@@ -332,11 +386,11 @@ class ServiceRepository {
     return rows.map((r) => ServiceItem.fromMap(r)).toList();
   }
 
-  /// آیا این کد قبلاً برای هر خدمتی (فعال یا حذف‌شده) ثبت شده است؟
-  /// [excludeId]: خود خدمتِ در حال ویرایش.
+  /// آیا این کد برای خدمت دیگری «گرفته‌شده» است؟ کد خدمت حذف‌شده‌ی بدون سابقه‌ی
+  /// فاکتور گرفته‌شده حساب نمی‌شود. [excludeId]: خود خدمتِ در حال ویرایش.
   Future<bool> codeExists(String code, {int? excludeId}) async {
     final db = await _db.database;
-    return _codeTaken(db, code, excludeId: excludeId);
+    return ServiceCodeManager.isTaken(db, code, excludeId: excludeId);
   }
 
   /// گزارش کدهای تکراریِ قدیمی که از نسخه‌های قبلی در دیتابیس مانده‌اند.
@@ -348,14 +402,11 @@ class ServiceRepository {
   }
 
   // ---------------------------------------------------------------------
-  // شماره‌گذاری خودکار کد: سری‌های جداگانه‌ی B (برق خودرو)، M (مکانیک)،
-  // J (جلوبندی) و IMP (سایر دسته‌ها). هر سری شماره‌ی جدا دارد.
+  // شماره‌گذاری خودکار کد: پیشوند هر دسته از ستون code_prefix همان دسته
+  // خوانده می‌شود (کاربر هنگام ساخت دسته تعیین می‌کند). هر پیشوند سری جدا دارد.
   // ---------------------------------------------------------------------
 
-  /// سری پیش‌فرض کد خودکار (برای دسته‌هایی که سری اختصاصی ندارند).
-  static const String defaultSeriesPrefix = 'IMP-';
-
-  /// قالب نهایی کد: پیشوند + شماره‌ی چهار رقمی، مثل B-0001.
+  /// قالب نهایی کد: پیشوند (با خط تیره) + شماره‌ی چهار رقمی، مثل B-0001.
   static String formatAutoCode(String prefix, int n) => '$prefix${n.toString().padLeft(4, '0')}';
 
   /// نرمال‌سازی نام فقط برای مقایسه (ی/ي، ک/ك، نیم‌فاصله، فاصله‌ی اضافی).
@@ -366,28 +417,23 @@ class ServiceRepository {
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
 
-  /// پیشوند سری کد بر اساس نام دسته: جلوبندی = J، مکانیک = M، برق خودرو = B.
-  /// هر دسته‌ی دیگر در سری پیش‌فرض IMP می‌ماند.
-  static String seriesPrefixForName(String categoryName) {
-    final n = normalizeName(categoryName);
-    if (n.contains('جلوبندی')) return 'J-';
-    if (n.contains('مکانیک')) return 'M-';
-    if (n.contains('برق')) return 'B-';
-    return defaultSeriesPrefix;
-  }
-
-  /// پیشوند سری کد برای یک دسته (فقط می‌خواند).
+  /// پیشوند سری کد یک دسته، با خط تیره (مثلاً «M-»). فقط می‌خواند.
+  /// اگر دسته پیشوند نداشته باشد [ServiceCategoryException] پرتاب می‌شود.
   Future<String> autoCodePrefixForCategory(int? categoryId) async {
-    if (categoryId == null) return defaultSeriesPrefix;
+    if (categoryId == null) throw const ServiceCategoryException('دسته‌بندی انتخاب نشده است');
     final db = await _db.database;
     final rows = await db.query('service_categories',
-        columns: ['name'], where: 'id = ?', whereArgs: [categoryId], limit: 1);
-    if (rows.isEmpty) return defaultSeriesPrefix;
-    return seriesPrefixForName((rows.first['name'] as String?) ?? '');
+        columns: ['code_prefix'], where: 'id = ?', whereArgs: [categoryId], limit: 1);
+    final p = rows.isEmpty ? '' : ((rows.first['code_prefix'] as String?) ?? '').trim();
+    if (p.isEmpty) {
+      throw const ServiceCategoryException(
+          'برای این دسته‌بندی پیشوند کد تعیین نشده است؛ ابتدا در «مدیریت دسته‌بندی‌ها» پیشوند را ثبت کنید');
+    }
+    return '$p-';
   }
 
   /// بزرگ‌ترین شماره‌ی موجود در یک سری (مثلاً برای B- همه‌ی کدهای B-0001، B-0002، ...).
-  /// خدمات حذف‌شده هم حساب می‌شوند تا هیچ کدی دوباره استفاده نشود. فقط می‌خواند.
+  /// خدمات حذف‌شده هم حساب می‌شوند. فقط می‌خواند.
   Future<int> maxAutoNumber(String prefix) async {
     final db = await _db.database;
     final rows = await db.rawQuery('SELECT code FROM services WHERE code LIKE ?', ['$prefix%']);
@@ -401,17 +447,11 @@ class ServiceRepository {
     return maxNum;
   }
 
-  /// کد خودکار بعدی برای یک دسته: B-0001، B-0002، ... (برق خودرو)،
-  /// M-0001، ... (مکانیک)، J-0001، ... (جلوبندی)؛ هر سری شماره‌گذاری جدا دارد.
-  /// چیزی ذخیره نمی‌کند. اگر کد پیشنهادی به هر دلیل از قبل وجود داشته باشد،
-  /// به شماره‌ی بعدی می‌رود.
+  /// کد پیشنهادی بعدی برای یک دسته (کوچک‌ترین کد آزاد؛ اگر نبود، بعد از آخرین).
+  /// چیزی ذخیره نمی‌کند.
   Future<String> nextAutoCode({int? categoryId}) async {
-    final prefix = await autoCodePrefixForCategory(categoryId);
-    var next = (await maxAutoNumber(prefix)) + 1;
-    while (await codeExists(formatAutoCode(prefix, next))) {
-      next++;
-    }
-    return formatAutoCode(prefix, next);
+    final info = await ServiceCodeManager().loadCodeInfo(categoryId: categoryId);
+    return info.suggested;
   }
 
   // ---------------------------------------------------------------------
@@ -430,7 +470,7 @@ class ServiceRepository {
   // ---------------------------------------------------------------------
 
   /// آیا این خدمت برای خودروی داده‌شده معتبر است؟
-  ///  - خدمت اختصاصی یک مدل: فقط برای همان مدل (برای هیچ خودروی دیگر، حتی هم‌برند).
+  ///  - خدمت اختصاصی یک مدل: فقط برای همان مدل.
   ///  - خدمت اختصاصی یک برند (بدون مدل): فقط برای خودروهای همان برند.
   ///  - خدمت عمومی (بدون برند و مدل): برای همه.
   static bool matchesVehicle(ServiceItem s, int? brandId, int? modelId) {
