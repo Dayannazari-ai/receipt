@@ -738,13 +738,15 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(_isEdit ? 'ویرایش خدمت' : 'خدمت جدید', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-                    TextField(
+                              TextField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(labelText: 'نام خدمت')),
+          const SizedBox(height: 12),
+          TextField(
               controller: _codeCtrl,
               decoration: InputDecoration(
                   labelText: 'کد خدمت',
-                  helperText: _isEdit ? null : 'اگر خالی بماند، کد خودکار ثبت می‌شود')),
-          const SizedBox(height: 12),
-          TextField(controller: _codeCtrl, decoration: const InputDecoration(labelText: 'کد خدمت')),
+                  helperText: _isEdit ? null : 'کد خودکار پیشنهاد می‌شود؛ در صورت نیاز تغییرش دهید')),
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
             value: _categoryId,
