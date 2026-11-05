@@ -26,8 +26,8 @@ class DatabaseHelper {
   // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
   // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
   // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
-  static const int dbVersion = 13;
-
+    // نسخه ۱۴: ستون code_prefix روی service_categories (پیشوند کد خدمات هر دسته).
+  static const int dbVersion = 14;
   Database? _db;
 
   Future<Database> get database async {
@@ -103,13 +103,16 @@ class DatabaseHelper {
     batch.execute('CREATE INDEX idx_vehicles_customer ON vehicles(customer_id)');
     batch.execute('CREATE INDEX idx_vehicles_plate ON vehicles(plate_number)');
 
-    batch.execute('''
+        batch.execute('''
       CREATE TABLE service_categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
+        code_prefix TEXT,
         is_deleted INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    batch.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_service_categories_prefix ON service_categories(code_prefix COLLATE NOCASE) WHERE code_prefix IS NOT NULL');
 
     batch.execute('''
       CREATE TABLE services (
@@ -135,7 +138,6 @@ class DatabaseHelper {
     batch.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_services_code_unique ON services(code)');
 
     batch.execute('''
-      CREATE TABLE service_price_history (
       CREATE TABLE service_price_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         service_id INTEGER NOT NULL,
@@ -367,6 +369,45 @@ class DatabaseHelper {
   /// نصب موجود (کاربر قبلی): فقط ستون‌های جدید با ALTER TABLE اضافه می‌شوند.
   /// هیچ جدولی حذف یا بازسازی نمی‌شود و هیچ داده‌ای از بین نمی‌رود.
     Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+        if (oldVersion < 14) {
+      // نسخه ۱۴: ستون code_prefix روی service_categories (پیشوند کد خدمات هر دسته).
+      // هیچ خدمت، کد یا فاکتوری تغییر نمی‌کند. پیشوندی که تا امروز عملاً برای هر دسته
+      // استفاده می‌شد یک‌بار به‌عنوان داده نوشته می‌شود؛ اگر دو دسته همان پیشوند را
+      // می‌گرفتند فقط اولی (کوچک‌ترین id) آن را می‌گیرد و بقیه خالی می‌مانند تا
+      // کاربر خودش پیشوند تعیین کند.
+      try {
+        await db.execute('ALTER TABLE service_categories ADD COLUMN code_prefix TEXT');
+      } catch (_) {}
+      try {
+        String legacyPrefix(String name) {
+          final n = name.replaceAll('ي', 'ی').replaceAll('ك', 'ک').replaceAll('\u200c', ' ');
+          if (n.contains('جلوبندی')) return 'J';
+          if (n.contains('مکانیک')) return 'M';
+          if (n.contains('برق')) return 'B';
+          return 'IMP';
+        }
+
+        final cats = await db.query('service_categories',
+            columns: ['id', 'name', 'code_prefix'], orderBy: 'id');
+        final used = <String>{};
+        for (final c in cats) {
+          final existing = ((c['code_prefix'] as String?) ?? '').trim();
+          if (existing.isNotEmpty) used.add(existing.toUpperCase());
+        }
+        for (final c in cats) {
+          final existing = ((c['code_prefix'] as String?) ?? '').trim();
+          if (existing.isNotEmpty) continue;
+          final p = legacyPrefix((c['name'] as String?) ?? '');
+          if (used.add(p)) {
+            await db.update('service_categories', {'code_prefix': p}, where: 'id = ?', whereArgs: [c['id']]);
+          }
+        }
+      } catch (_) {}
+      try {
+        await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_service_categories_prefix ON service_categories(code_prefix COLLATE NOCASE) WHERE code_prefix IS NOT NULL');
+      } catch (_) {}
+    }
     if (oldVersion < 13) {
       // نسخه ۱۳: یکتایی کد خدمت در خود دیتابیس. هیچ خدمت یا کدی تغییر یا حذف نمی‌شود.
       // اگر کدهای تکراریِ قدیمی وجود نداشته باشد، index یکتا ساخته می‌شود. اگر وجود
