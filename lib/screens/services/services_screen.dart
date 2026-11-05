@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../models/service.dart';
 import '../../models/vehicle_reference.dart';
 import '../../repositories/service_repository.dart';
+import '../../repositories/service_code_manager.dart';
+import 'category_prefix_dialog.dart';
 import '../../repositories/vehicle_reference_repository.dart';
 import '../voice_search_sheet.dart';
 import '../../services/voice_search_service.dart';
@@ -131,27 +133,15 @@ class _ServicesScreenState extends State<ServicesScreen> {
     });
   }
 
-  Future<void> _addCategory() async {
-    final ctrl = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('دسته‌بندی جدید'),
-        content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'نام دسته‌بندی')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('انصراف')),
-          TextButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('افزودن')),
-        ],
-      ),
-    );
-        if (name != null && name.isNotEmpty) {
-      try {
-        await _categoryRepo.add(name);
-      } on ServiceCategoryException catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-      await _load();
+    Future<void> _addCategory() async {
+    final r = await askCategoryNameAndPrefix(context);
+    if (r == null) return;
+    try {
+      await _categoryRepo.add(r.name, prefix: r.prefix);
+    } on ServiceCategoryException catch (e) {
+      if (mounted) await showCategoryError(context, e.message);
     }
+    await _load();
   }
 
     /// مدیریت دسته‌بندی‌ها (تغییر نام، حذف/بایگانی، بازیابی). بعد از بسته شدن، فهرست خدمات تازه می‌شود.
@@ -534,33 +524,89 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     if (s == null) _prefillNextCode();
     _loadBrands();
   }
-    /// کد بعدی سری هر دسته را می‌خواند و اگر کاربر هنوز چیزی ننوشته باشد در فیلد می‌گذارد.
-  Future<void> _prefillNextCode() async {
-    final code = await _serviceRepo.nextAutoCode(categoryId: _categoryId);
-    if (!mounted || _codeCtrl.text.trim().isNotEmpty) return;
-    setState(() {
-      _autoCode = code;
-      _codeCtrl.text = code;
-    });
+      final _codeMgr = ServiceCodeManager();
+  String? _codeNotice;
+
+  /// کد پیشنهادی (کوچک‌ترین کد آزاد؛ اگر نبود، شماره‌ی بعد از آخرین) برای سری دسته‌ی داده‌شده.
+  Future<void> _suggestFor(int? categoryId) async {
+    try {
+      final info = await _codeMgr.loadCodeInfo(categoryId: categoryId);
+      if (!mounted || _categoryId != categoryId) return;
+      setState(() {
+        _autoCode = info.suggested;
+        _codeCtrl.text = info.suggested;
+        _codeNotice = null;
+      });
+    } on ServiceCategoryException catch (e) {
+      if (!mounted || _categoryId != categoryId) return;
+      setState(() {
+        _autoCode = null;
+        _codeCtrl.text = '';
+        _codeNotice = e.message;
+      });
+    } catch (_) {}
   }
 
-  /// با عوض شدن دسته، کد پیشنهادی به سری همان دسته می‌رود (B، M، J یا IMP).
-  /// کدی که کاربر خودش نوشته دست‌نخورده می‌ماند. در ویرایش خدمت هیچ کدی عوض نمی‌شود.
+  Future<void> _prefillNextCode() => _suggestFor(_categoryId);
+
+  /// با عوض شدن دسته، کد به سری همان دسته می‌رود. در ویرایش خدمت هیچ کدی عوض نمی‌شود.
   Future<void> _onCategoryChanged(int? v) async {
     setState(() => _categoryId = v);
     if (_isEdit || v == null) return;
-    bool untouched() {
-      final t = _codeCtrl.text.trim();
-      return t.isEmpty || t == _autoCode;
-    }
+    await _suggestFor(v);
+  }
 
-    if (!untouched()) return;
-    final code = await _serviceRepo.nextAutoCode(categoryId: v);
-    if (!mounted || _categoryId != v || !untouched()) return;
-    setState(() {
-      _autoCode = code;
-      _codeCtrl.text = code;
-    });
+  /// آیکون کنار فیلد کد: فهرست کدهای آزاد این دسته، برای انتخاب.
+  Future<void> _pickFreeCode() async {
+    if (_isEdit) return;
+    final ServiceCodeInfo info;
+    try {
+      info = await _codeMgr.loadCodeInfo(categoryId: _categoryId);
+    } on ServiceCategoryException catch (e) {
+      await _showError(e.message);
+      return;
+    }
+    if (!mounted) return;
+    Widget codeText(String c) => Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Directionality(textDirection: TextDirection.ltr, child: Text(c)));
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('انتخاب کد خدمت', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+          if (info.freeCodes.isEmpty) ...[
+            const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text('کد آزادی وجود ندارد؛ کد بعدی خودکار اختصاص داده می‌شود.')),
+            ListTile(
+                title: codeText(info.suggested),
+                selected: info.suggested == _autoCode,
+                onTap: () => Navigator.pop(ctx, info.suggested)),
+          ] else ...[
+            const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text('کدهای آزاد (خدمات حذف‌شده‌ی بدون سابقه‌ی فاکتور)',
+                    style: TextStyle(fontSize: 12, color: Colors.grey))),
+            Flexible(
+              child: ListView(shrinkWrap: true, children: [
+                for (final c in info.freeCodes)
+                  ListTile(title: codeText(c), selected: c == _autoCode, onTap: () => Navigator.pop(ctx, c)),
+              ]),
+            ),
+          ],
+        ]),
+      ),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _autoCode = picked;
+        _codeCtrl.text = picked;
+        _codeNotice = null;
+      });
+    }
   }
 
   Future<void> _loadBrands() async {
@@ -777,11 +823,21 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
               controller: _nameCtrl,
               decoration: const InputDecoration(labelText: 'نام خدمت')),
           const SizedBox(height: 12),
-          TextField(
+                    TextField(
               controller: _codeCtrl,
+              readOnly: true,
               decoration: InputDecoration(
                   labelText: 'کد خدمت',
-                  helperText: _isEdit ? null : 'کد خودکار پیشنهاد می‌شود؛ در صورت نیاز تغییرش دهید')),
+                  errorText: _codeNotice,
+                  helperText: _isEdit
+                      ? 'کد خدمت قابل تغییر نیست'
+                      : 'کد خودکار تعیین می‌شود؛ برای انتخاب کد آزاد روی آیکون بزن',
+                  suffixIcon: _isEdit
+                      ? null
+                      : IconButton(
+                          tooltip: 'انتخاب از کدهای آزاد',
+                          icon: const Icon(Icons.auto_fix_high),
+                          onPressed: _pickFreeCode))),
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
             value: _categoryId,
@@ -1025,7 +1081,7 @@ class _PickerSheetState extends State<_PickerSheet> {
   }
 }
 
-/// مدیریت دسته‌بندی‌ها: افزودن، تغییر نام، حذف/بایگانی و بازیابی.
+/// مدیریت دسته‌بندی‌ها: افزودن (با پیشوند کد)، تغییر نام، تعیین پیشوند، حذف/بایگانی و بازیابی.
 /// فقط با ServiceCategoryRepository کار می‌کند و به خدمات، قیمت‌ها و فاکتورها دست نمی‌زند.
 class _CategoryManagerSheet extends StatefulWidget {
   const _CategoryManagerSheet();
@@ -1066,13 +1122,7 @@ class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
   Future<void> _showError(Object e) async {
     final msg = e is ServiceCategoryException ? e.message : 'خطا: $e';
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        content: Text(msg),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('باشه'))],
-      ),
-    );
+    await showCategoryError(context, msg);
   }
 
   Future<String?> _askName(String title, String initial, String okLabel) {
@@ -1092,11 +1142,11 @@ class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
   }
 
   Future<void> _add() async {
-    final name = await _askName('دسته‌بندی جدید', '', 'افزودن');
-    if (name == null || name.isEmpty) return;
+    final r = await askCategoryNameAndPrefix(context);
+    if (r == null) return;
     try {
-      await _repo.add(name);
-      _notice = 'دسته‌بندی «$name» اضافه شد';
+      await _repo.add(r.name, prefix: r.prefix);
+      _notice = 'دسته‌بندی «${r.name}» با پیشوند ${r.prefix} اضافه شد';
     } catch (e) {
       await _showError(e);
     }
@@ -1108,7 +1158,19 @@ class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
     if (name == null || name.isEmpty || name == c.name) return;
     try {
       await _repo.rename(c.id!, name);
-      _notice = 'نام تغییر کرد. کدهای قبلی خدمات عوض نمی‌شوند؛ کد خدمات جدید بر اساس نام تازه ساخته می‌شود.';
+      _notice = 'نام تغییر کرد. پیشوند و کدهای قبلی خدمات عوض نمی‌شوند.';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _editPrefix(ServiceCategory c) async {
+    final p = await askCategoryPrefix(context, initial: c.codePrefix ?? '');
+    if (p == null) return;
+    try {
+      await _repo.setPrefix(c.id!, p);
+      _notice = 'پیشوند دسته‌بندی «${c.name}» ثبت شد: $p';
     } catch (e) {
       await _showError(e);
     }
@@ -1182,30 +1244,43 @@ class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
                   child: ListView(controller: scrollController, children: [
                     if (_active.isEmpty)
                       const Padding(padding: EdgeInsets.all(12), child: Text('دسته‌بندی فعالی وجود ندارد')),
-                    ..._active.map((c) => ListTile(
-                          title: Text(c.name),
-                          subtitle: Text('${_counts[c.id] ?? 0} خدمت', style: const TextStyle(fontSize: 12)),
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (v) {
-                              if (v == 'rename') {
-                                _rename(c);
-                              } else {
-                                _remove(c);
-                              }
-                            },
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(value: 'rename', child: Text('تغییر نام')),
+                    ..._active.map((c) {
+                      final n = _counts[c.id] ?? 0;
+                      final hasPrefix = (c.codePrefix ?? '').trim().isNotEmpty;
+                      return ListTile(
+                        title: Text(c.name),
+                        subtitle: Text(
+                            hasPrefix ? '$n خدمت • پیشوند کد: ${c.codePrefix}' : '$n خدمت • پیشوند کد تعیین نشده',
+                            style: TextStyle(fontSize: 12, color: hasPrefix ? null : Colors.red)),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (v) {
+                            if (v == 'rename') {
+                              _rename(c);
+                            } else if (v == 'prefix') {
+                              _editPrefix(c);
+                            } else {
+                              _remove(c);
+                            }
+                          },
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(value: 'rename', child: Text('تغییر نام')),
+                            if (!hasPrefix || n == 0)
                               PopupMenuItem(
-                                  value: 'remove', child: Text('حذف / بایگانی', style: TextStyle(color: Colors.red))),
-                            ],
-                          ),
-                        )),
+                                  value: 'prefix', child: Text(hasPrefix ? 'تغییر پیشوند کد' : 'تعیین پیشوند کد')),
+                            const PopupMenuItem(
+                                value: 'remove', child: Text('حذف / بایگانی', style: TextStyle(color: Colors.red))),
+                          ],
+                        ),
+                      );
+                    }),
                     if (_archived.isNotEmpty)
                       ExpansionTile(
                         title: Text('دسته‌های بایگانی‌شده (${_archived.length})'),
                         children: _archived
                             .map((c) => ListTile(
                                   title: Text(c.name),
+                                  subtitle: Text('پیشوند کد: ${c.codePrefix ?? '—'}',
+                                      style: const TextStyle(fontSize: 12)),
                                   trailing: TextButton(onPressed: () => _restore(c), child: const Text('بازیابی')),
                                 ))
                             .toList(),
