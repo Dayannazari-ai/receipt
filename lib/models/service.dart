@@ -2,15 +2,18 @@ class ServiceCategory {
   final int? id;
   final String name;
   final int isDeleted;
+  final String? codePrefix; // بدون خط تیره، مثل B یا PDR
 
-  ServiceCategory({this.id, required this.name, this.isDeleted = 0});
+  ServiceCategory({this.id, required this.name, this.isDeleted = 0, this.codePrefix});
 
-  Map<String, dynamic> toMap() => {'id': id, 'name': name, 'is_deleted': isDeleted};
+  Map<String, dynamic> toMap() =>
+      {'id': id, 'name': name, 'is_deleted': isDeleted, 'code_prefix': codePrefix};
 
   factory ServiceCategory.fromMap(Map<String, dynamic> map) => ServiceCategory(
         id: map['id'] as int?,
         name: map['name'] as String,
         isDeleted: map['is_deleted'] as int? ?? 0,
+        codePrefix: map['code_prefix'] as String?,
       );
 }
 
