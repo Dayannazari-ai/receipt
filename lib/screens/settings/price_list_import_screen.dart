@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../models/service.dart';
 import '../../repositories/service_repository.dart';
 import '../../services/price_list_import_service.dart';
+import '../services/category_prefix_dialog.dart';
 
 class PriceListImportScreen extends StatefulWidget {
   const PriceListImportScreen({super.key});
@@ -37,27 +38,15 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
     });
   }
 
-  Future<void> _addCategory() async {
-    final ctrl = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('دسته‌بندی جدید'),
-        content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'نام دسته‌بندی')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('انصراف')),
-          TextButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('افزودن')),
-        ],
-      ),
-    );
-        if (name != null && name.isNotEmpty) {
-      try {
-        final id = await _categoryRepo.add(name);
-        await _loadCategories();
-        if (mounted) setState(() => _selectedCategoryId = id);
-      } on ServiceCategoryException catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
+    Future<void> _addCategory() async {
+    final r = await askCategoryNameAndPrefix(context);
+    if (r == null) return;
+    try {
+      final id = await _categoryRepo.add(r.name, prefix: r.prefix);
+      await _loadCategories();
+      if (mounted) setState(() => _selectedCategoryId = id);
+    } on ServiceCategoryException catch (e) {
+      if (mounted) await showCategoryError(context, e.message);
     }
   }
 
