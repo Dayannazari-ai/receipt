@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import '../database/database_helper.dart';
 import '../models/service.dart';
 import 'service_code_manager.dart';
+import 'service_group_repository.dart';
 
 /// وقتی کد خدمت از قبل برای خدمت دیگری ثبت شده و قابل بازاستفاده نباشد.
 /// هم از بررسی داخل برنامه و هم از قید یکتایی خود دیتابیس پرتاب می‌شود.
@@ -16,7 +17,7 @@ class DuplicateServiceCodeException implements Exception {
   String toString() => message;
 }
 
-/// خطای قابل‌فهم برای کاربر در مدیریت دسته‌بندی‌ها (نام خالی، نام تکرار، پیشوند نامعتبر، ...).
+/// خطای قابل‌فهم برای کاربر در مدیریت دسته‌بندی‌ها و مجموعه‌ها (نام خالی، نام تکرار، پیشوند نامعتبر، ...).
 class ServiceCategoryException implements Exception {
   final String message;
   const ServiceCategoryException(this.message);
@@ -195,14 +196,19 @@ class ServiceCategoryRepository {
   }
 
   /// حذف یا بایگانی (با تأیید کاربر در صفحه، قبل از صدا زدن این متد):
-  ///  - هیچ خدمتی وابسته نیست: حذف قطعی ردیف دسته.
+  ///  - هیچ خدمتی وابسته نیست (نه مستقیم، نه از طریق مجموعه‌های این دسته): مجموعه‌های خالی
+  ///    دسته و خود دسته حذف قطعی می‌شوند.
   ///  - حتی یک خدمت وابسته است: فقط is_deleted = 1 (بایگانی)؛ هیچ ردیف دیگری لمس نمی‌شود.
   Future<CategoryRemoval> removeOrArchive(int id) async {
     final db = await _db.database;
     return db.transaction((txn) async {
-      final r = await txn.rawQuery('SELECT COUNT(*) FROM services WHERE category_id = ?', [id]);
+      final r = await txn.rawQuery(
+          'SELECT COUNT(*) FROM services WHERE category_id = ? '
+          'OR service_group_id IN (SELECT id FROM service_groups WHERE category_id = ?)',
+          [id, id]);
       final n = Sqflite.firstIntValue(r) ?? 0;
       if (n == 0) {
+        await txn.delete('service_groups', where: 'category_id = ?', whereArgs: [id]);
         await txn.delete('service_categories', where: 'id = ?', whereArgs: [id]);
         return CategoryRemoval.deleted;
       }
@@ -259,12 +265,14 @@ class ServiceRepository {
       e.isUniqueConstraintError() || e.toString().contains('DUPLICATE_SERVICE_CODE');
 
   /// ثبت خدمت جدید. اگر کد تکراری باشد، [DuplicateServiceCodeException] پرتاب
-  /// می‌شود و چیزی ثبت نمی‌شود.
+  /// می‌شود و چیزی ثبت نمی‌شود. اگر مجموعه‌ی انتخاب‌شده نامعتبر باشد
+  /// (نامربوط به دسته یا غیرفعال)، [ServiceCategoryException].
   Future<int> insert(ServiceItem s) async {
     final db = await _db.database;
     final code = s.code.trim();
     try {
       return await db.transaction((txn) async {
+        await ServiceGroupRepository.validateForService(txn, s.serviceGroupId, s.categoryId);
         await ServiceCodeManager.ensureFree(txn, code);
         final map = s.toMap()
           ..remove('id')
@@ -280,17 +288,23 @@ class ServiceRepository {
   /// ویرایش خدمت. اگر قیمت تغییر کرده باشد، در تاریخچه ثبت می‌شود (سوابق قبلی هرگز
   /// حذف نمی‌شوند). قیمت قبلی از خود دیتابیس خوانده می‌شود. اگر کد عوض شده و تکراری
   /// باشد، [DuplicateServiceCodeException] پرتاب می‌شود. اگر کد تغییری نکرده، بررسی
-  /// تکراری انجام نمی‌شود.
+  /// تکراری انجام نمی‌شود. مجموعه‌ی غیرفعالِ فعلیِ خدمت قابل نگه‌داشتن است.
   Future<void> update(ServiceItem oldItem, ServiceItem newItem) async {
     final db = await _db.database;
     final code = newItem.code.trim();
     try {
       await db.transaction((txn) async {
         final cur = await txn.query('services',
-            columns: ['code', 'price'], where: 'id = ?', whereArgs: [newItem.id], limit: 1);
+            columns: ['code', 'price', 'service_group_id'],
+            where: 'id = ?',
+            whereArgs: [newItem.id],
+            limit: 1);
         final currentCode = cur.isEmpty ? null : cur.first['code'] as String?;
+        final currentGroupId = cur.isEmpty ? null : (cur.first['service_group_id'] as num?)?.toInt();
         final oldPrice = cur.isEmpty ? oldItem.price : (cur.first['price'] as num).toDouble();
 
+        await ServiceGroupRepository.validateForService(txn, newItem.serviceGroupId, newItem.categoryId,
+            currentGroupId: currentGroupId);
         if (currentCode != code) {
           await ServiceCodeManager.ensureFree(txn, code, excludeId: newItem.id);
         }
