@@ -17,10 +17,51 @@ class ServiceCategory {
       );
 }
 
+/// مجموعه خدمات: سطح میانی بین دسته‌بندی و خدمت (دسته ← مجموعه ← خدمت).
+/// nameKey نام نرمال‌شده است و فقط برای جلوگیری از نام تکراری در یک دسته به‌کار می‌رود.
+class ServiceGroup {
+  final int? id;
+  final int categoryId;
+  final String name;
+  final String nameKey;
+  final int sortOrder;
+  final int isActive;
+
+  ServiceGroup({
+    this.id,
+    required this.categoryId,
+    required this.name,
+    this.nameKey = '',
+    this.sortOrder = 0,
+    this.isActive = 1,
+  });
+
+  bool get active => isActive == 1;
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'category_id': categoryId,
+        'name': name,
+        'name_key': nameKey,
+        'sort_order': sortOrder,
+        'is_active': isActive,
+      };
+
+  factory ServiceGroup.fromMap(Map<String, dynamic> map) => ServiceGroup(
+        id: map['id'] as int?,
+        categoryId: map['category_id'] as int,
+        name: map['name'] as String,
+        nameKey: (map['name_key'] as String?) ?? '',
+        sortOrder: map['sort_order'] as int? ?? 0,
+        isActive: map['is_active'] as int? ?? 1,
+      );
+}
+
 /// هر خدمت اکنون تک‌قیمت است (نه سه‌نرخی). قیمت با ویرایش تغییر می‌کند
 /// اما تاریخچه‌ی قیمت‌های قبلی در جدول service_price_history نگه داشته می‌شود.
 /// برند/مدل خودرو اختیاری است: اگر مشخص شود، این قیمت فقط برای آن برند/مدل معتبر است؛
 /// در غیر این صورت قیمت برای همه‌ی خودروها یکسان است.
+/// serviceGroupId اختیاری است؛ خدمات قدیمی بدون مجموعه (null) می‌مانند.
 class ServiceItem {
   final int? id;
   final String name;
@@ -28,6 +69,7 @@ class ServiceItem {
   final int categoryId;
   final int? brandId;
   final int? modelId;
+  final int? serviceGroupId;
   final double price;
   final String? notes;
   final String? voiceSearchLabel;
@@ -41,6 +83,7 @@ class ServiceItem {
     required this.categoryId,
     this.brandId,
     this.modelId,
+    this.serviceGroupId,
     required this.price,
     this.notes,
     this.voiceSearchLabel,
@@ -55,6 +98,7 @@ class ServiceItem {
         'category_id': categoryId,
         'brand_id': brandId,
         'model_id': modelId,
+        'service_group_id': serviceGroupId,
         'price': price,
         'notes': notes,
         'voice_search_label': voiceSearchLabel,
@@ -69,6 +113,7 @@ class ServiceItem {
         categoryId: map['category_id'] as int,
         brandId: map['brand_id'] as int?,
         modelId: map['model_id'] as int?,
+        serviceGroupId: map['service_group_id'] as int?,
         price: (map['price'] as num).toDouble(),
         notes: map['notes'] as String?,
         voiceSearchLabel: map['voice_search_label'] as String?,
@@ -83,6 +128,7 @@ class ServiceItem {
         categoryId: categoryId,
         brandId: brandId,
         modelId: modelId,
+        serviceGroupId: serviceGroupId,
         price: price ?? this.price,
         notes: notes,
         voiceSearchLabel: voiceSearchLabel ?? this.voiceSearchLabel,
