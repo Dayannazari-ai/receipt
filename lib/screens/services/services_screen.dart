@@ -3,6 +3,7 @@ import '../../models/service.dart';
 import '../../models/vehicle_reference.dart';
 import '../../repositories/service_repository.dart';
 import '../../repositories/service_code_manager.dart';
+import '../../repositories/service_group_repository.dart';
 import 'category_prefix_dialog.dart';
 import '../../repositories/vehicle_reference_repository.dart';
 import '../voice_search_sheet.dart';
@@ -51,11 +52,13 @@ class ServicesScreen extends StatefulWidget {
 
 class _ServicesScreenState extends State<ServicesScreen> {
   final _categoryRepo = ServiceCategoryRepository();
+  final _groupRepo = ServiceGroupRepository();
   final _serviceRepo = ServiceRepository();
   final _settingsRepo = SettingsRepository();
   final _vehicleRepo = VehicleReferenceRepository();
 
   List<ServiceCategory> _categories = [];
+  List<ServiceGroup> _groups = [];
   List<ServiceItem> _services = [];
   List<VehicleBrand> _brands = [];
   List<VehicleModel> _models = [];
@@ -64,6 +67,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
   Currency _currency = Currency.toman;
   bool _loading = true;
   final _searchCtrl = TextEditingController();
+  int? _filterCategoryId;
+  int? _filterGroupId;
   int? _filterBrandId;
   int? _filterModelId;
   String _sortBy = 'name'; // 'name' یا 'code'
@@ -89,8 +94,26 @@ class _ServicesScreenState extends State<ServicesScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final categories = await _categoryRepo.getAll();
+
+    // فیلتر دسته‌بندی و مجموعه: اگر دیگر معتبر نباشند (مثلاً دسته بایگانی شده) بازنشانی می‌شوند.
+    final int? catFilter = (_filterCategoryId != null && categories.any((c) => c.id == _filterCategoryId))
+        ? _filterCategoryId
+        : null;
+    final List<ServiceGroup> groups =
+        catFilter == null ? <ServiceGroup>[] : await _groupRepo.getByCategory(catFilter);
+    final int? groupFilter =
+        (catFilter != null && _filterGroupId != null && groups.any((g) => g.id == _filterGroupId))
+            ? _filterGroupId
+            : null;
+
     var services =
         _searchCtrl.text.trim().isEmpty ? await _serviceRepo.getAll() : await _serviceRepo.search(_searchCtrl.text.trim());
+    if (catFilter != null) {
+      services = services.where((s) => s.categoryId == catFilter).toList();
+    }
+    if (groupFilter != null) {
+      services = services.where((s) => s.serviceGroupId == groupFilter).toList();
+    }
     if (_filterBrandId != null) {
       services = services.where((s) => s.brandId == _filterBrandId).toList();
     }
@@ -123,6 +146,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
       final visibleIds = services.where((s) => catIds.contains(s.categoryId)).map((s) => s.id).toSet();
       _selected.removeWhere((id) => !visibleIds.contains(id));
       _categories = categories;
+      _filterCategoryId = catFilter;
+      _filterGroupId = groupFilter;
+      _groups = groups;
       _services = services;
       _brands = brands;
       _models = models;
@@ -133,7 +159,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
     });
   }
 
-    Future<void> _addCategory() async {
+  Future<void> _addCategory() async {
     final r = await askCategoryNameAndPrefix(context);
     if (r == null) return;
     try {
@@ -144,7 +170,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
     await _load();
   }
 
-    /// مدیریت دسته‌بندی‌ها (تغییر نام، حذف/بایگانی، بازیابی). بعد از بسته شدن، فهرست خدمات تازه می‌شود.
+  /// مدیریت دسته‌بندی‌ها (تغییر نام، حذف/بایگانی، بازیابی، مجموعه‌ها). بعد از بسته شدن، فهرست خدمات تازه می‌شود.
   Future<void> _openCategoryManager() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -166,6 +192,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
     if (saved == true) _load();
   }
+
   Future<void> _showServiceActions(ServiceItem service) async {
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -342,38 +369,41 @@ class _ServicesScreenState extends State<ServicesScreen> {
     for (final l in grouped.values) {
       l.sort(_compareServices);
     }
+    // اگر فیلتر دسته‌بندی انتخاب شده باشد، فقط همان دسته نمایش داده می‌شود.
+    final shownCategories =
+        _filterCategoryId == null ? _categories : _categories.where((c) => c.id == _filterCategoryId).toList();
 
     return Scaffold(
       appBar: _selecting
           ? _selectionAppBar()
           : AppBar(title: const Text('خدمات'), actions: [
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.sort),
-          tooltip: 'مرتب‌سازی',
-          onSelected: (v) => setState(() => _sortBy = v),
-          itemBuilder: (_) => [
-            CheckedPopupMenuItem<String>(
-              value: 'name',
-              checked: _sortBy == 'name',
-              child: const Text('بر اساس نام'),
-            ),
-            CheckedPopupMenuItem<String>(
-              value: 'code',
-              checked: _sortBy == 'code',
-              child: const Text('بر اساس کد'),
-            ),
-          ],
-        ),
-        IconButton(
-          icon: const Icon(Icons.checklist),
-          tooltip: 'انتخاب گروهی',
-          onPressed: () => _enterSelection(null),
-        ),
-                IconButton(
-            icon: const Icon(Icons.create_new_folder_outlined),
-            tooltip: 'مدیریت دسته‌بندی‌ها',
-            onPressed: _openCategoryManager),
-      ]),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.sort),
+                tooltip: 'مرتب‌سازی',
+                onSelected: (v) => setState(() => _sortBy = v),
+                itemBuilder: (_) => [
+                  CheckedPopupMenuItem<String>(
+                    value: 'name',
+                    checked: _sortBy == 'name',
+                    child: const Text('بر اساس نام'),
+                  ),
+                  CheckedPopupMenuItem<String>(
+                    value: 'code',
+                    checked: _sortBy == 'code',
+                    child: const Text('بر اساس کد'),
+                  ),
+                ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.checklist),
+                tooltip: 'انتخاب گروهی',
+                onPressed: () => _enterSelection(null),
+              ),
+              IconButton(
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  tooltip: 'مدیریت دسته‌بندی‌ها',
+                  onPressed: _openCategoryManager),
+            ]),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.all(12),
@@ -382,6 +412,52 @@ class _ServicesScreenState extends State<ServicesScreen> {
             decoration: const InputDecoration(hintText: 'جستجوی خدمت', prefixIcon: Icon(Icons.search)),
             onChanged: (_) => _load(),
           ),
+        ),
+        // فیلتر دسته‌بندی و مجموعه خدمات: اول دسته، بعد مجموعه‌های همان دسته
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<int?>(
+                key: ValueKey('fc-$_filterCategoryId-${_categories.length}'),
+                value: _categories.any((c) => c.id == _filterCategoryId) ? _filterCategoryId : null,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'فیلتر دسته‌بندی', isDense: true),
+                items: [
+                  const DropdownMenuItem<int?>(value: null, child: Text('همه دسته‌ها')),
+                  ..._categories.map((c) => DropdownMenuItem<int?>(value: c.id, child: Text(c.name))),
+                ],
+                onChanged: (v) {
+                  setState(() {
+                    _filterCategoryId = v;
+                    _filterGroupId = null;
+                    _groups = [];
+                  });
+                  _load();
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<int?>(
+                key: ValueKey('fg-$_filterCategoryId-$_filterGroupId-${_groups.length}'),
+                value: _groups.any((g) => g.id == _filterGroupId) ? _filterGroupId : null,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'فیلتر مجموعه خدمات', isDense: true),
+                items: [
+                  const DropdownMenuItem<int?>(value: null, child: Text('همه مجموعه‌ها')),
+                  ..._groups.map((g) => DropdownMenuItem<int?>(
+                      value: g.id, child: Text(g.active ? g.name : '${g.name} (غیرفعال)'))),
+                ],
+                onChanged: _filterCategoryId == null
+                    ? null
+                    : (v) {
+                        setState(() => _filterGroupId = v);
+                        _load();
+                      },
+              ),
+            ),
+          ]),
         ),
         // فیلتر جداگانه برند و مدل - طبق درخواست، جدا از هم برای جستجوی دقیق‌تر
         Padding(
@@ -430,9 +506,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   ? const Center(child: Text('ابتدا یک دسته‌بندی ایجاد کنید'))
                   : ListView(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 88),
-                      children: _categories.map((cat) {
+                      children: shownCategories.map((cat) {
                         final list = grouped[cat.id] ?? [];
-                        if (list.isEmpty && (_searchCtrl.text.isNotEmpty || _filterBrandId != null)) {
+                        if (list.isEmpty &&
+                            _filterCategoryId == null &&
+                            (_searchCtrl.text.isNotEmpty || _filterBrandId != null)) {
                           return const SizedBox.shrink();
                         }
                         final selCount = list.where((s) => _selected.contains(s.id)).length;
@@ -483,7 +561,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
   }
 }
 
-/// فرم افزودن/ویرایش خدمت با انتخاب کلیکی دسته‌بندی، برند و مدل از بانک اطلاعات.
+/// فرم افزودن/ویرایش خدمت با انتخاب کلیکی دسته‌بندی، مجموعه، برند و مدل از بانک اطلاعات.
 class _ServiceFormSheet extends StatefulWidget {
   final List<ServiceCategory> categories;
   final ServiceItem? service;
@@ -496,20 +574,26 @@ class _ServiceFormSheet extends StatefulWidget {
 class _ServiceFormSheetState extends State<_ServiceFormSheet> {
   final _vehicleRepo = VehicleReferenceRepository();
   final _serviceRepo = ServiceRepository();
+  final _groupRepo = ServiceGroupRepository();
+  final _codeMgr = ServiceCodeManager();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _codeCtrl;
   late final TextEditingController _priceCtrl;
   late final TextEditingController _voiceLabelCtrl;
   int? _categoryId;
+  int? _groupId;
   int? _brandId;
   int? _modelId;
+  List<ServiceGroup> _groups = [];
   List<VehicleBrand> _brands = [];
   List<VehicleModel> _models = [];
   bool _saving = false;
   // آخرین کدی که خودکار در فیلد گذاشته شده
   String? _autoCode;
+  String? _codeNotice;
 
   bool get _isEdit => widget.service != null;
+
   @override
   void initState() {
     super.initState();
@@ -519,13 +603,37 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     _priceCtrl = TextEditingController(text: s?.price.toStringAsFixed(0) ?? '');
     _voiceLabelCtrl = TextEditingController(text: s?.voiceSearchLabel ?? '');
     _categoryId = s?.categoryId ?? widget.categories.first.id;
+    _groupId = s?.serviceGroupId;
     _brandId = s?.brandId;
     _modelId = s?.modelId;
     if (s == null) _prefillNextCode();
+    _loadGroups();
     _loadBrands();
   }
-      final _codeMgr = ServiceCodeManager();
-  String? _codeNotice;
+
+  /// مجموعه‌های قابل انتخاب برای دسته‌ی فعلی: فقط فعال‌ها؛ در ویرایش، مجموعه‌ی
+  /// غیرفعالِ فعلیِ خود خدمت هم نگه داشته می‌شود. اگر مجموعه‌ی انتخاب‌شده
+  /// در این فهرست نباشد (نامربوط به دسته)، پاک می‌شود.
+  Future<void> _loadGroups() async {
+    final cat = _categoryId;
+    if (cat == null) {
+      if (mounted) {
+        setState(() {
+          _groups = [];
+          _groupId = null;
+        });
+      }
+      return;
+    }
+    final all = await _groupRepo.getByCategory(cat);
+    if (!mounted || _categoryId != cat) return;
+    final keep = widget.service?.serviceGroupId;
+    final list = all.where((g) => g.active || (_isEdit && g.id == keep)).toList();
+    setState(() {
+      _groups = list;
+      if (_groupId != null && !list.any((g) => g.id == _groupId)) _groupId = null;
+    });
+  }
 
   /// کد پیشنهادی (کوچک‌ترین کد آزاد؛ اگر نبود، شماره‌ی بعد از آخرین) برای سری دسته‌ی داده‌شده.
   Future<void> _suggestFor(int? categoryId) async {
@@ -549,9 +657,16 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
 
   Future<void> _prefillNextCode() => _suggestFor(_categoryId);
 
-  /// با عوض شدن دسته، کد به سری همان دسته می‌رود. در ویرایش خدمت هیچ کدی عوض نمی‌شود.
+  /// با عوض شدن دسته، مجموعه‌ی نامربوط پاک می‌شود (در ویرایش، با برگشت به دسته‌ی
+  /// اصلی مجموعه‌ی قبلیِ خدمت برمی‌گردد) و کد به سری همان دسته می‌رود.
+  /// در ویرایش خدمت هیچ کدی عوض نمی‌شود.
   Future<void> _onCategoryChanged(int? v) async {
-    setState(() => _categoryId = v);
+    setState(() {
+      _categoryId = v;
+      _groups = [];
+      _groupId = (_isEdit && v != null && v == widget.service!.categoryId) ? widget.service!.serviceGroupId : null;
+    });
+    await _loadGroups();
     if (_isEdit || v == null) return;
     await _suggestFor(v);
   }
@@ -714,6 +829,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     );
     setState(() => _modelId = selected);
   }
+
   Future<void> _recordVoiceLabel() async {
     final text = await VoiceSearchService().listenOnce();
     if (text == null) {
@@ -726,7 +842,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
     setState(() => _voiceLabelCtrl.text = text);
   }
 
-      /// پیام خطا وسط صفحه. چون داخل خود برگه نمایش داده می‌شود، زیر آن پنهان نمی‌ماند.
+  /// پیام خطا وسط صفحه. چون داخل خود برگه نمایش داده می‌شود، زیر آن پنهان نمی‌ماند.
   Future<void> _showError(String message) async {
     if (!mounted) return;
     await showDialog<void>(
@@ -779,6 +895,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
         categoryId: _categoryId!,
         brandId: _brandId,
         modelId: _modelId,
+        serviceGroupId: _groupId,
         price: price,
         voiceSearchLabel: _voiceLabelCtrl.text.trim().isEmpty ? null : _voiceLabelCtrl.text.trim(),
       );
@@ -819,11 +936,11 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(_isEdit ? 'ویرایش خدمت' : 'خدمت جدید', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-                              TextField(
+          TextField(
               controller: _nameCtrl,
               decoration: const InputDecoration(labelText: 'نام خدمت')),
           const SizedBox(height: 12),
-                    TextField(
+          TextField(
               controller: _codeCtrl,
               readOnly: true,
               decoration: InputDecoration(
@@ -844,6 +961,19 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
             decoration: const InputDecoration(labelText: 'دسته‌بندی'),
             items: widget.categories.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name))).toList(),
             onChanged: _onCategoryChanged,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<int?>(
+            key: ValueKey('grp-$_categoryId-${_groups.length}-$_groupId'),
+            value: _groups.any((g) => g.id == _groupId) ? _groupId : null,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'مجموعه خدمات'),
+            items: [
+              const DropdownMenuItem<int?>(value: null, child: Text('بدون مجموعه')),
+              ..._groups.map((g) =>
+                  DropdownMenuItem<int?>(value: g.id, child: Text(g.active ? g.name : '${g.name} (غیرفعال)'))),
+            ],
+            onChanged: (v) => setState(() => _groupId = v),
           ),
           const SizedBox(height: 12),
           ListTile(
@@ -1081,8 +1211,8 @@ class _PickerSheetState extends State<_PickerSheet> {
   }
 }
 
-/// مدیریت دسته‌بندی‌ها: افزودن (با پیشوند کد)، تغییر نام، تعیین پیشوند، حذف/بایگانی و بازیابی.
-/// فقط با ServiceCategoryRepository کار می‌کند و به خدمات، قیمت‌ها و فاکتورها دست نمی‌زند.
+/// مدیریت دسته‌بندی‌ها: افزودن (با پیشوند کد)، تغییر نام، تعیین پیشوند، مجموعه‌های خدمات،
+/// حذف/بایگانی و بازیابی. به خدمات، قیمت‌ها و فاکتورها دست نمی‌زند.
 class _CategoryManagerSheet extends StatefulWidget {
   const _CategoryManagerSheet();
   @override
@@ -1177,6 +1307,15 @@ class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
     await _reload();
   }
 
+  /// مدیریت مجموعه‌های خدمات یک دسته (افزودن، تغییر نام، ترتیب، فعال/غیرفعال).
+  Future<void> _openGroups(ServiceCategory c) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _GroupManagerSheet(category: c),
+    );
+  }
+
   Future<void> _remove(ServiceCategory c) async {
     final n = await _repo.serviceCount(c.id!);
     if (!mounted) return;
@@ -1258,12 +1397,15 @@ class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
                               _rename(c);
                             } else if (v == 'prefix') {
                               _editPrefix(c);
+                            } else if (v == 'groups') {
+                              _openGroups(c);
                             } else {
                               _remove(c);
                             }
                           },
                           itemBuilder: (_) => [
                             const PopupMenuItem(value: 'rename', child: Text('تغییر نام')),
+                            const PopupMenuItem(value: 'groups', child: Text('مجموعه‌های خدمات')),
                             if (!hasPrefix || n == 0)
                               PopupMenuItem(
                                   value: 'prefix', child: Text(hasPrefix ? 'تغییر پیشوند کد' : 'تعیین پیشوند کد')),
@@ -1285,6 +1427,211 @@ class _CategoryManagerSheetState extends State<_CategoryManagerSheet> {
                                 ))
                             .toList(),
                       ),
+                  ]),
+                ),
+              ]),
+      ),
+    );
+  }
+}
+
+/// مدیریت مجموعه‌های خدمات یک دسته: افزودن، تغییر نام، جابه‌جایی ترتیب (بالا/پایین)،
+/// فعال/غیرفعال و حذف (فقط مجموعه‌ی بدون خدمت). به خدمات، قیمت‌ها و فاکتورها دست نمی‌زند.
+class _GroupManagerSheet extends StatefulWidget {
+  final ServiceCategory category;
+  const _GroupManagerSheet({required this.category});
+  @override
+  State<_GroupManagerSheet> createState() => _GroupManagerSheetState();
+}
+
+class _GroupManagerSheetState extends State<_GroupManagerSheet> {
+  final _repo = ServiceGroupRepository();
+  List<ServiceGroup> _groups = [];
+  Map<int, int> _counts = {};
+  bool _loading = true;
+  String? _notice;
+
+  int get _categoryId => widget.category.id!;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final groups = await _repo.getByCategory(_categoryId);
+    final counts = <int, int>{};
+    for (final g in groups) {
+      if (g.id != null) counts[g.id!] = await _repo.serviceCount(g.id!);
+    }
+    if (!mounted) return;
+    setState(() {
+      _groups = groups;
+      _counts = counts;
+      _loading = false;
+    });
+  }
+
+  Future<void> _showError(Object e) async {
+    final msg = e is ServiceCategoryException ? e.message : 'خطا: $e';
+    if (!mounted) return;
+    await showCategoryError(context, msg);
+  }
+
+  Future<String?> _askName(String title, String initial, String okLabel) {
+    final ctrl = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+            controller: ctrl, autofocus: true, decoration: const InputDecoration(labelText: 'نام مجموعه')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: Text(okLabel)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _add() async {
+    final name = await _askName('مجموعه‌ی جدید', '', 'افزودن');
+    if (name == null) return;
+    try {
+      await _repo.add(_categoryId, name);
+      _notice = 'مجموعه «$name» اضافه شد';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _rename(ServiceGroup g) async {
+    final name = await _askName('تغییر نام مجموعه', g.name, 'ذخیره');
+    if (name == null || name.isEmpty || name == g.name) return;
+    try {
+      await _repo.rename(g.id!, name);
+      _notice = 'نام مجموعه تغییر کرد';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _move(ServiceGroup g, bool up) async {
+    try {
+      await _repo.move(g.id!, up: up);
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _toggle(ServiceGroup g) async {
+    try {
+      await _repo.setActive(g.id!, !g.active);
+      _notice = g.active ? 'مجموعه «${g.name}» غیرفعال شد' : 'مجموعه «${g.name}» فعال شد';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  Future<void> _remove(ServiceGroup g) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف مجموعه'),
+        content: Text('مجموعه «${g.name}» هیچ خدمتی ندارد و برای همیشه حذف می‌شود. ادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final r = await _repo.removeOrDeactivate(g.id!);
+      _notice = r == GroupRemoval.deleted ? 'مجموعه حذف شد' : 'مجموعه خدمت دارد و فقط غیرفعال شد';
+    } catch (e) {
+      await _showError(e);
+    }
+    await _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.8,
+      expand: false,
+      builder: (context, scrollController) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Expanded(
+                    child: Text('مجموعه‌های «${widget.category.name}»',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                  TextButton.icon(
+                      icon: const Icon(Icons.add, size: 18), label: const Text('مجموعه جدید'), onPressed: _add),
+                ]),
+                if (_notice != null) ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(_notice!, style: const TextStyle(fontSize: 12, color: Colors.green)),
+                  ),
+                ],
+                const Divider(),
+                Expanded(
+                  child: ListView(controller: scrollController, children: [
+                    if (_groups.isEmpty)
+                      const Padding(padding: EdgeInsets.all(12), child: Text('هنوز مجموعه‌ای ثبت نشده')),
+                    ..._groups.asMap().entries.map((e) {
+                      final i = e.key;
+                      final g = e.value;
+                      final n = _counts[g.id] ?? 0;
+                      return ListTile(
+                        title: Text(g.active ? g.name : '${g.name} (غیرفعال)',
+                            style: TextStyle(color: g.active ? null : Colors.grey)),
+                        subtitle: Text('$n خدمت', style: const TextStyle(fontSize: 12)),
+                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'بالا',
+                            icon: const Icon(Icons.arrow_upward, size: 20),
+                            onPressed: i == 0 ? null : () => _move(g, true),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'پایین',
+                            icon: const Icon(Icons.arrow_downward, size: 20),
+                            onPressed: i == _groups.length - 1 ? null : () => _move(g, false),
+                          ),
+                          PopupMenuButton<String>(
+                            onSelected: (v) {
+                              if (v == 'rename') {
+                                _rename(g);
+                              } else if (v == 'toggle') {
+                                _toggle(g);
+                              } else {
+                                _remove(g);
+                              }
+                            },
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(value: 'rename', child: Text('تغییر نام')),
+                              PopupMenuItem(value: 'toggle', child: Text(g.active ? 'غیرفعال کردن' : 'فعال کردن')),
+                              if (n == 0)
+                                const PopupMenuItem(
+                                    value: 'remove', child: Text('حذف', style: TextStyle(color: Colors.red))),
+                            ],
+                          ),
+                        ]),
+                      );
+                    }),
                   ]),
                 ),
               ]),
