@@ -26,8 +26,9 @@ class DatabaseHelper {
   // نسخه ۸: اتصال فاکتور به حساب مالی. جدول جدید finance_cheques (چک‌های
   // در انتظار وصول) و ستون invoices.finance_pay (تیک «پرداخت از حساب فروش
   // کالا» برای فاکتور خرید؛ پیش‌فرض ۰ پس فاکتورهای قبلی تغییری نمی‌کنند).
-    // نسخه ۱۴: ستون code_prefix روی service_categories (پیشوند کد خدمات هر دسته).
-  static const int dbVersion = 14;
+  // نسخه ۱۴: ستون code_prefix روی service_categories (پیشوند کد خدمات هر دسته).
+  // نسخه ۱۵: جدول service_groups (مجموعه خدمات) و ستون services.service_group_id.
+  static const int dbVersion = 15;
   Database? _db;
 
   Future<Database> get database async {
@@ -103,7 +104,7 @@ class DatabaseHelper {
     batch.execute('CREATE INDEX idx_vehicles_customer ON vehicles(customer_id)');
     batch.execute('CREATE INDEX idx_vehicles_plate ON vehicles(plate_number)');
 
-        batch.execute('''
+    batch.execute('''
       CREATE TABLE service_categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -114,6 +115,23 @@ class DatabaseHelper {
     batch.execute(
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_service_categories_prefix ON service_categories(code_prefix COLLATE NOCASE) WHERE code_prefix IS NOT NULL');
 
+    // مجموعه خدمات: سطح میانی بین دسته‌بندی و خدمت. name_key نام نرمال‌شده است
+    // و index یکتای (category_id, name_key) جلوی نام تکراری در یک دسته را می‌گیرد
+    // (مجموعه‌های غیرفعال هم حساب می‌شوند).
+    batch.execute('''
+      CREATE TABLE service_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        name_key TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY (category_id) REFERENCES service_categories(id)
+      )
+    ''');
+    batch.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_service_groups_cat_key ON service_groups(category_id, name_key)');
+
     batch.execute('''
       CREATE TABLE services (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +140,7 @@ class DatabaseHelper {
         category_id INTEGER NOT NULL,
         brand_id INTEGER,
         model_id INTEGER,
+        service_group_id INTEGER,
         price REAL NOT NULL,
         notes TEXT,
         voice_search_label TEXT,
@@ -129,11 +148,13 @@ class DatabaseHelper {
         is_deleted INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (category_id) REFERENCES service_categories(id),
         FOREIGN KEY (brand_id) REFERENCES vehicle_brands(id),
-        FOREIGN KEY (model_id) REFERENCES vehicle_models(id)
+        FOREIGN KEY (model_id) REFERENCES vehicle_models(id),
+        FOREIGN KEY (service_group_id) REFERENCES service_groups(id) ON DELETE SET NULL
       )
     ''');
     batch.execute('CREATE INDEX idx_services_category ON services(category_id)');
     batch.execute('CREATE INDEX idx_services_brand ON services(brand_id)');
+    batch.execute('CREATE INDEX idx_services_group ON services(service_group_id)');
     batch.execute('CREATE INDEX idx_services_code ON services(code)');
     batch.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_services_code_unique ON services(code)');
 
@@ -328,7 +349,7 @@ class DatabaseHelper {
     ''',
     'CREATE INDEX IF NOT EXISTS idx_fin_chq_status ON finance_cheques(status, due_date)',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_chq_uid ON finance_cheques(backup_uid)',
-        // نسخه‌ی ۱۱: پرداخت‌ها/چک‌های هر فاکتور (هر چک مستقل پیگیری می‌شود).
+    // نسخه‌ی ۱۱: پرداخت‌ها/چک‌های هر فاکتور (هر چک مستقل پیگیری می‌شود).
     '''
       CREATE TABLE IF NOT EXISTS invoice_payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -368,8 +389,37 @@ class DatabaseHelper {
 
   /// نصب موجود (کاربر قبلی): فقط ستون‌های جدید با ALTER TABLE اضافه می‌شوند.
   /// هیچ جدولی حذف یا بازسازی نمی‌شود و هیچ داده‌ای از بین نمی‌رود.
-    Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-        if (oldVersion < 14) {
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 15) {
+      // نسخه ۱۵: مجموعه خدمات. فقط یک جدول جدید و یک ستون خالی‌پذیر اضافه می‌شود.
+      // هیچ خدمت، کد، قیمت، برند/مدل، برچسب صوتی یا فاکتوری تغییر نمی‌کند و
+      // خدمات قدیمی بدون مجموعه (NULL) می‌مانند. هیچ نگاشت حدسی انجام نمی‌شود.
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS service_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            name_key TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (category_id) REFERENCES service_categories(id)
+          )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_service_groups_cat_key ON service_groups(category_id, name_key)');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE services ADD COLUMN service_group_id INTEGER REFERENCES service_groups(id) ON DELETE SET NULL');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_services_group ON services(service_group_id)');
+      } catch (_) {}
+    }
+    if (oldVersion < 14) {
       // نسخه ۱۴: ستون code_prefix روی service_categories (پیشوند کد خدمات هر دسته).
       // هیچ خدمت، کد یا فاکتوری تغییر نمی‌کند. پیشوندی که تا امروز عملاً برای هر دسته
       // استفاده می‌شد یک‌بار به‌عنوان داده نوشته می‌شود؛ اگر دو دسته همان پیشوند را
@@ -430,39 +480,57 @@ class DatabaseHelper {
         } catch (_) {}
       }
     }
-    if (oldVersion < 2) {
-      // ستون ممکن است در نصب‌های خیلی جدید از قبل وجود داشته باشد؛
-      // برای اطمینان، خطای "duplicate column" را نادیده می‌گیریم تا
-      // ارتقا هرگز باعث Crash نشود.
+    if (oldVersion < 12) {
+      // نسخه ۱۲: یکتایی کد کالا در خود دیتابیس (بدون تفاوت حروف بزرگ/کوچک). اگر
+      // کد تکراریِ قدیمی وجود داشته باشد ساخته نمی‌شود و برنامه بدون خطا ادامه
+      // می‌دهد؛ کنترل برنامه فعال می‌ماند و صفحه‌ی «مدیریت کدهای کالا» هشدار می‌دهد.
       try {
-        await db.execute('ALTER TABLE products ADD COLUMN voice_search_label TEXT');
-      } catch (_) {}
-      try {
-        await db.execute('ALTER TABLE services ADD COLUMN voice_search_label TEXT');
+        await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_products_code_unique ON products(code COLLATE NOCASE)');
       } catch (_) {}
     }
-    if (oldVersion < 3) {
+    if (oldVersion < 11) {
+      // نسخه ۱۱: جدول کاملاً جدید پرداخت‌ها/چک‌ها؛ داده‌ی قبلی لمس نمی‌شود.
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
+    }
+    if (oldVersion < 10) {
+      // نسخه ۱۰: کیلومتر مراجعه‌ی خودرو روی فاکتور. فاکتورهای قبلی NULL می‌مانند.
       try {
-        await db.execute('ALTER TABLE vehicle_brands ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+        await db.execute('ALTER TABLE invoices ADD COLUMN mileage_km INTEGER');
       } catch (_) {}
     }
-    if (oldVersion < 4) {
-      // افزودن وضعیت «پیش‌فاکتور». مقدار پیش‌فرض ۰ یعنی تمام فاکتورهای
-      // قبلی همچنان فاکتور اصلی محسوب می‌شوند؛ هیچ داده‌ای تغییر نمی‌کند.
-      try {
-        await db.execute('ALTER TABLE invoices ADD COLUMN is_draft INTEGER NOT NULL DEFAULT 0');
-      } catch (_) {}
-      try {
-        await db.execute('CREATE INDEX idx_invoices_is_draft ON invoices(is_draft)');
-      } catch (_) {}
+    if (oldVersion < 9) {
+      // نسخه ۹: جدول هزینه‌های خدماتی. جدول کاملاً جدید است و داده‌ی قبلی لمس نمی‌شود.
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
     }
-    if (oldVersion < 5) {
-      // افزودن کد کالا/خدمت فریزشده به هر ردیف فاکتور. رکوردهای قدیمی
-      // item_code را NULL می‌گیرند و در PDF/UI با یک خط تیره نمایش
-      // داده می‌شوند؛ هیچ داده‌ای بازنویسی یا حذف نمی‌شود.
+    if (oldVersion < 8) {
+      // ستون finance_pay با پیش‌فاکتور ۰: فاکتورهای قبلی بدون تغییر می‌مانند.
       try {
-        await db.execute('ALTER TABLE invoice_items ADD COLUMN item_code TEXT');
+        await db.execute('ALTER TABLE invoices ADD COLUMN finance_pay INTEGER NOT NULL DEFAULT 0');
       } catch (_) {}
+      // جدول چک‌ها (و بقیه‌ی دستورهای IF NOT EXISTS، که بی‌خطر تکرار می‌شوند).
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
+    }
+    if (oldVersion < 7) {
+      // فقط دو جدول کاملاً جدید برای حساب مالی فروش کالا. هیچ جدول یا
+      // ستون موجودی لمس نمی‌شود، پس داده‌ی قبلی تحت تأثیر قرار نمی‌گیرد.
+      for (final sql in _financeSchema) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
     }
     if (oldVersion < 6) {
       // جدول خودروها. رابطه‌ی یک‌به‌چند با مشتری؛ هیچ داده‌ی قبلی تحت تأثیر
@@ -510,57 +578,39 @@ class DatabaseHelper {
         await db.execute('CREATE UNIQUE INDEX idx_invoices_backup_uid ON invoices(backup_uid)');
       } catch (_) {}
     }
-    if (oldVersion < 7) {
-      // فقط دو جدول کاملاً جدید برای حساب مالی فروش کالا. هیچ جدول یا
-      // ستون موجودی لمس نمی‌شود، پس داده‌ی قبلی تحت تأثیر قرار نمی‌گیرد.
-      for (final sql in _financeSchema) {
-        try {
-          await db.execute(sql);
-        } catch (_) {}
-      }
-    }
-     if (oldVersion < 12) {
-      // نسخه ۱۲: یکتایی کد کالا در خود دیتابیس (بدون تفاوت حروف بزرگ/کوچک). اگر
-      // کد تکراریِ قدیمی وجود داشته باشد ساخته نمی‌شود و برنامه بدون خطا ادامه
-      // می‌دهد؛ کنترل برنامه فعال می‌ماند و صفحه‌ی «مدیریت کدهای کالا» هشدار می‌دهد.
+    if (oldVersion < 5) {
+      // افزودن کد کالا/خدمت فریزشده به هر ردیف فاکتور. رکوردهای قدیمی
+      // item_code را NULL می‌گیرند و در PDF/UI با یک خط تیره نمایش
+      // داده می‌شوند؛ هیچ داده‌ای بازنویسی یا حذف نمی‌شود.
       try {
-        await db.execute(
-            'CREATE UNIQUE INDEX IF NOT EXISTS idx_products_code_unique ON products(code COLLATE NOCASE)');
-      } catch (_) {}
-        }    
-    if (oldVersion < 11) {
-      // نسخه ۱۱: جدول کاملاً جدید پرداخت‌ها/چک‌ها؛ داده‌ی قبلی لمس نمی‌شود.
-      for (final sql in _financeSchema) {
-        try {
-          await db.execute(sql);
-        } catch (_) {}
-      }
-    }
-    if (oldVersion < 10) {
-      // نسخه ۱۰: کیلومتر مراجعه‌ی خودرو روی فاکتور. فاکتورهای قبلی NULL می‌مانند.
-      try {
-        await db.execute('ALTER TABLE invoices ADD COLUMN mileage_km INTEGER');
+        await db.execute('ALTER TABLE invoice_items ADD COLUMN item_code TEXT');
       } catch (_) {}
     }
-    if (oldVersion < 9) {
-      // نسخه ۹: جدول هزینه‌های خدماتی. جدول کاملاً جدید است و داده‌ی قبلی لمس نمی‌شود.
-      for (final sql in _financeSchema) {
-        try {
-          await db.execute(sql);
-        } catch (_) {}
-      }
-    }
-    if (oldVersion < 8) {
-      // ستون finance_pay با پیش‌فاکتور ۰: فاکتورهای قبلی بدون تغییر می‌مانند.
+    if (oldVersion < 4) {
+      // افزودن وضعیت «پیش‌فاکتور». مقدار پیش‌فرض ۰ یعنی تمام فاکتورهای
+      // قبلی همچنان فاکتور اصلی محسوب می‌شوند؛ هیچ داده‌ای تغییر نمی‌کند.
       try {
-        await db.execute('ALTER TABLE invoices ADD COLUMN finance_pay INTEGER NOT NULL DEFAULT 0');
+        await db.execute('ALTER TABLE invoices ADD COLUMN is_draft INTEGER NOT NULL DEFAULT 0');
       } catch (_) {}
-      // جدول چک‌ها (و بقیه‌ی دستورهای IF NOT EXISTS، که بی‌خطر تکرار می‌شوند).
-      for (final sql in _financeSchema) {
-        try {
-          await db.execute(sql);
-        } catch (_) {}
-      }
+      try {
+        await db.execute('CREATE INDEX idx_invoices_is_draft ON invoices(is_draft)');
+      } catch (_) {}
+    }
+    if (oldVersion < 3) {
+      try {
+        await db.execute('ALTER TABLE vehicle_brands ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+    }
+    if (oldVersion < 2) {
+      // ستون ممکن است در نصب‌های خیلی جدید از قبل وجود داشته باشد؛
+      // برای اطمینان، خطای "duplicate column" را نادیده می‌گیریم تا
+      // ارتقا هرگز باعث Crash نشود.
+      try {
+        await db.execute('ALTER TABLE products ADD COLUMN voice_search_label TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE services ADD COLUMN voice_search_label TEXT');
+      } catch (_) {}
     }
   }
 
