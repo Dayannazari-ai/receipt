@@ -5,6 +5,8 @@ import '../../repositories/service_repository.dart';
 import '../../services/price_list_import_service.dart';
 import '../services/category_prefix_dialog.dart';
 
+String _fmtPrice(num p) => p == p.roundToDouble() ? p.toInt().toString() : p.toString();
+
 class PriceListImportScreen extends StatefulWidget {
   const PriceListImportScreen({super.key});
   @override
@@ -18,8 +20,7 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
 
   List<ServiceCategory> _categories = [];
   int? _selectedCategoryId;
-  List<Map<String, dynamic>>? _preview;
-  int? _totalCount;
+  ImportPreview? _pv;
   bool _busy = false;
   String? _error;
 
@@ -38,7 +39,7 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
     });
   }
 
-    Future<void> _addCategory() async {
+  Future<void> _addCategory() async {
     final r = await askCategoryNameAndPrefix(context);
     if (r == null) return;
     try {
@@ -58,8 +59,7 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
     if (result != null && result.files.single.path != null) {
       setState(() {
         _pathCtrl.text = result.files.single.path!;
-        _preview = null;
-        _totalCount = null;
+        _pv = null;
         _error = null;
       });
     }
@@ -68,31 +68,23 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
   Future<void> _doPreview() async {
     setState(() {
       _error = null;
-      _preview = null;
-      _totalCount = null;
+      _pv = null;
       _busy = true;
     });
     try {
-      final preview = await _importService.previewFile(_pathCtrl.text.trim());
-      final total = await _importService.countEntries(_pathCtrl.text.trim());
-      if (preview.isEmpty) {
-        setState(() => _error =
-            'هیچ ردیف معتبری در فایل پیدا نشد. مطمئن شوید سرستون سطر اول شامل کلمه‌ی «خدمات» یا «خدمت» است.');
-      } else {
-        setState(() {
-          _preview = preview;
-          _totalCount = total;
-        });
-      }
+      final pv = await _importService.analyzeFile(_pathCtrl.text.trim());
+      if (mounted) setState(() => _pv = pv);
+    } on ImportStructureException catch (e) {
+      if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = 'خطا در خواندن فایل: $e');
+      if (mounted) setState(() => _error = 'خطا در خواندن فایل: $e');
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _confirmImport() async {
-    if (_selectedCategoryId == null) return;
+    if (_selectedCategoryId == null || _pv == null) return;
     setState(() => _busy = true);
     try {
       final result = await _importService.importFromFile(
@@ -104,15 +96,26 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
             SnackBar(content: Text('${result.services} خدمت و ${result.brands} برند جدید وارد شد')));
         Navigator.pop(context);
       }
+    } on ImportStructureException catch (e) {
+      if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = 'خطا در وارد کردن: $e');
+      if (mounted) setState(() => _error = 'خطا در وارد کردن: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  Widget _noteBox(Color color, List<Widget> children) => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+      );
+
   @override
   Widget build(BuildContext context) {
+    final pv = _pv;
     return Scaffold(
       appBar: AppBar(title: const Text('وارد کردن نرخ‌نامه')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
@@ -120,19 +123,22 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
           child: const Text(
-            'فایل اصلی نرخ‌نامه (با برندها در ستون‌ها و خدمات در سطرها، دقیقاً مثل فایل اتحادیه) '
-            'پشتیبانی می‌شود. کافی است ستون نام خدمت در سرستون شامل کلمه‌ی «خدمات» باشد؛ باقی ستون‌های '
-            'قبل از آن به‌عنوان برند در نظر گرفته می‌شوند.',
+            'دو ساختار پشتیبانی می‌شود و از روی سرستون‌ها تشخیص داده می‌شود:\n'
+            '۱) فایل عریض: برندها در ستون‌ها و خدمات در سطرها، با سرستون نام خدمت شامل کلمه‌ی «خدمات».\n'
+            '۲) فایل طولی: هر ردیف یک خدمت برای یک برند و مدل، با سرستون‌های «نام خدمت»، «برند خودرو»، «مدل خودرو»، «قیمت» '
+            'و اختیاری «برچسب جستجوی صوتی». ستون‌های کد خدمت و دسته‌بندی نادیده گرفته می‌شوند و کد خودکار ساخته می‌شود.',
             style: TextStyle(fontSize: 12),
           ),
         ),
         const SizedBox(height: 16),
         Row(children: [
           Expanded(
-            child: TextField(controller: _pathCtrl, decoration: const InputDecoration(labelText: 'فایل انتخاب‌شده'), readOnly: true),
+            child: TextField(
+                controller: _pathCtrl, decoration: const InputDecoration(labelText: 'فایل انتخاب‌شده'), readOnly: true),
           ),
           const SizedBox(width: 8),
-          OutlinedButton.icon(icon: const Icon(Icons.folder_open), label: const Text('انتخاب فایل'), onPressed: _pickFile),
+          OutlinedButton.icon(
+              icon: const Icon(Icons.folder_open), label: const Text('انتخاب فایل'), onPressed: _pickFile),
         ]),
         const SizedBox(height: 16),
         Row(children: [
@@ -144,7 +150,7 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
               onChanged: (v) => setState(() => _selectedCategoryId = v),
             ),
           ),
-                    IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: _addCategory),
+          IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: _addCategory),
         ]),
         if (_categories.isEmpty) ...[
           const SizedBox(height: 8),
@@ -155,29 +161,66 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
         ElevatedButton(
           onPressed: _busy || _pathCtrl.text.isEmpty ? null : _doPreview,
           child: _busy
-              ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              ? const SizedBox(
+                  width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Text('پیش‌نمایش فایل'),
         ),
         if (_error != null) ...[
           const SizedBox(height: 12),
           Text(_error!, style: const TextStyle(color: Colors.red)),
         ],
-        if (_preview != null) ...[
+        if (pv != null) ...[
           const SizedBox(height: 20),
-          Text('پیش‌نمایش (نمونه از مجموع ${_totalCount ?? _preview!.length} ردیف):',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          _noteBox(Colors.green.shade50, [
+            Text('ساختار فایل: ${pv.modeLabel}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text('تعداد کل ردیف‌های معتبر: ${pv.total}'),
+            if (pv.ignoredColumns.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('ستون‌های نادیده‌گرفته‌شده: ${pv.ignoredColumns.join('، ')}',
+                  style: const TextStyle(fontSize: 12)),
+            ],
+          ]),
+          if (pv.newBrands.isNotEmpty)
+            _noteBox(Colors.orange.shade50, [
+              Text('برندهای جدید که ساخته می‌شوند (${pv.newBrands.length}):',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(pv.newBrands.join('، '), style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 4),
+              const Text('اگر این برند قبلاً با نام دیگری در برنامه هست، نام را در فایل اصلاح کنید و دوباره پیش‌نمایش بزنید.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ]),
+          if (pv.newModels.isNotEmpty)
+            _noteBox(Colors.orange.shade50, [
+              Text('مدل‌های جدید که ساخته می‌شوند (${pv.newModels.length}):',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(
+                  pv.newModels.take(12).join('، ') +
+                      (pv.newModels.length > 12 ? ' و ${pv.newModels.length - 12} مورد دیگر' : ''),
+                  style: const TextStyle(fontSize: 12)),
+            ]),
+          const SizedBox(height: 4),
+          Text('نمونه‌ی ${pv.sample.length} ردیف اول:', style: const TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          ..._preview!.map((r) => Card(
-                child: ListTile(
-                  title: Text(r['name'] as String),
-                  subtitle: Text('برند: ${r['brand']}'),
-                  trailing: Text('${r['price']}'),
-                ),
-              )),
+          ...pv.sample.map((r) {
+            final lines = <String>['برند: ${r['brand']}'];
+            if (r['model'] != null) lines.add('مدل: ${r['model']}');
+            if (r['voice'] != null) lines.add('برچسب صوتی: ${r['voice']}');
+            return Card(
+              child: ListTile(
+                isThreeLine: lines.length > 2,
+                title: Text(r['name'] as String),
+                subtitle: Text(lines.join('\n'), style: const TextStyle(fontSize: 12)),
+                trailing: Text(_fmtPrice(r['price'] as num)),
+              ),
+            );
+          }),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _busy || _selectedCategoryId == null ? null : _confirmImport,
-            child: Text('تأیید و وارد کردن نهایی (${_totalCount ?? _preview!.length} ردیف)'),
+            child: Text('تأیید و وارد کردن نهایی (${pv.total} ردیف)'),
           ),
         ],
       ]),
