@@ -4,6 +4,7 @@ import '../../models/service.dart';
 import '../../repositories/service_repository.dart';
 import '../../services/price_list_import_service.dart';
 import '../services/category_prefix_dialog.dart';
+import 'service_group_assign_screen.dart';
 
 String _fmtPrice(num p) => p == p.roundToDouble() ? p.toInt().toString() : p.toString();
 
@@ -152,6 +153,15 @@ class _PriceListImportScreenState extends State<PriceListImportScreen> {
           ),
           IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: _addCategory),
         ]),
+                Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TextButton.icon(
+            icon: const Icon(Icons.account_tree_outlined),
+            label: const Text('انتساب مجموعه به خدمات موجود'),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const ServiceGroupAssignScreen())),
+          ),
+        ),
         if (_categories.isEmpty) ...[
           const SizedBox(height: 8),
           const Text('هیچ دسته‌بندی فعالی وجود ندارد. با دکمه‌ی + یک دسته‌بندی بسازید؛ تا آن موقع وارد کردن نرخ‌نامه ممکن نیست.',
