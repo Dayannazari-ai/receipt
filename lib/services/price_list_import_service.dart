@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:excel/excel.dart';
 import '../models/service.dart';
+import '../repositories/service_group_repository.dart';
 import '../repositories/service_repository.dart';
 import '../repositories/vehicle_reference_repository.dart';
 
@@ -13,14 +14,29 @@ class ImportStructureException implements Exception {
   String toString() => message;
 }
 
+/// انتخاب صریح کاربر برای مجموعه‌های ناموجودِ فایل.
+/// create: ساخت مجموعه‌های جدید. skip: خدمات آن مجموعه‌ها بدون مجموعه وارد شوند.
+enum GroupImportChoice { create, skip }
+
+/// یک مجموعه‌ی دیده‌شده در فایل. status: exists | inactive | new
+class ImportGroupLine {
+  final String name;
+  final String status;
+  final int rows;
+  const ImportGroupLine(this.name, this.status, this.rows);
+}
+
 /// نتیجه‌ی تحلیل فایل برای پیش‌نمایش (چیزی ذخیره نمی‌کند).
 class ImportPreview {
   final String modeLabel;
   final int total;
-  final List<Map<String, dynamic>> sample; // name, brand, model, price, voice
+  final List<Map<String, dynamic>> sample; // name, brand, model, price, voice, group
   final List<String> newBrands; // برندهایی که هنگام ورود ساخته می‌شوند
   final List<String> newModels; // «برند - مدل»هایی که ساخته می‌شوند
   final List<String> ignoredColumns;
+  final bool hasGroupColumn;
+  final List<ImportGroupLine> groups;
+  final int rowsWithoutGroup;
   const ImportPreview({
     required this.modeLabel,
     required this.total,
@@ -28,7 +44,13 @@ class ImportPreview {
     required this.newBrands,
     required this.newModels,
     required this.ignoredColumns,
+    this.hasGroupColumn = false,
+    this.groups = const [],
+    this.rowsWithoutGroup = 0,
   });
+
+  int get newGroupCount => groups.where((g) => g.status == 'new').length;
+  int get inactiveGroupCount => groups.where((g) => g.status == 'inactive').length;
 }
 
 class _Entry {
@@ -37,7 +59,8 @@ class _Entry {
   final String? model;
   final double price;
   final String? voiceLabel;
-  const _Entry(this.name, this.brand, this.model, this.price, this.voiceLabel);
+  final String? group;
+  const _Entry(this.name, this.brand, this.model, this.price, this.voiceLabel, {this.group});
 }
 
 class _Extracted {
@@ -46,6 +69,13 @@ class _Extracted {
   final List<String> errors = [];
   bool anyLong = false;
   bool anyWide = false;
+  bool anyGroupColumn = false;
+}
+
+class _GroupPlan {
+  final List<ImportGroupLine> lines;
+  final Map<String, int> activeIdByKey; // فقط مجموعه‌های موجودِ فعال
+  const _GroupPlan(this.lines, this.activeIdByKey);
 }
 
 class PriceListImportService {
@@ -58,6 +88,7 @@ class PriceListImportService {
   static const Set<String> _modelHeaders = {'مدل خودرو', 'مدل'};
   static const Set<String> _priceHeaders = {'قیمت'};
   static const Set<String> _voiceHeaders = {'برچسب جستجوی صوتی'};
+  static const Set<String> _groupHeaders = {'مجموعه', 'مجموعه خدمات'};
 
   String? _cellText(CellValue? cv) {
     if (cv == null) return null;
@@ -206,10 +237,11 @@ class PriceListImportService {
         continue;
       }
 
-      // حالت طولی: هر چهار ستون ضروری باید دقیقاً یک‌بار باشند.
+      // حالت طولی: چهار ستون ضروری و «مجموعه» (اختیاری) باید دقیقاً یک‌بار باشند.
       final serviceI = indexesOf(_serviceHeaders);
       final priceI = indexesOf(_priceHeaders);
       final voiceI = indexesOf(_voiceHeaders);
+      final groupI = indexesOf(_groupHeaders);
       final sheetErrors = <String>[];
       if (hasPipe) {
         sheetErrors.add('ساختار مبهم است: هم ستون «برند/مدل» و هم سرستون‌هایی با علامت | وجود دارد');
@@ -227,6 +259,7 @@ class PriceListImportService {
       need(modelI, 'مدل خودرو');
       need(priceI, 'قیمت');
       if (voiceI.length > 1) sheetErrors.add('ستون «برچسب جستجوی صوتی» بیش از یک‌بار آمده است');
+      if (groupI.length > 1) sheetErrors.add('ستون «مجموعه» بیش از یک‌بار آمده است');
       if (sheetErrors.isNotEmpty) {
         for (final m in sheetErrors) {
           out.errors.add('شیت «$sheetName»: $m');
@@ -240,8 +273,13 @@ class PriceListImportService {
       final mI = modelI.first;
       final pI = priceI.first;
       final vI = voiceI.isEmpty ? null : voiceI.first;
+      final gI = groupI.isEmpty ? null : groupI.first;
       final used = <int>{sI, bI, mI, pI};
       if (vI != null) used.add(vI);
+      if (gI != null) {
+        used.add(gI);
+        out.anyGroupColumn = true;
+      }
       for (var i = 0; i < header.length; i++) {
         final t = _cellText(header[i]?.value);
         if (t != null && !used.contains(i)) out.ignored.add(t);
@@ -257,8 +295,16 @@ class PriceListImportService {
         final model = _cellText(at(mI));
         final priceText = _cellText(at(pI));
         final voice = vI == null ? null : _cellText(at(vI));
+        final group = gI == null ? null : _cellText(at(gI));
         // ردیف کاملاً خالی نادیده گرفته می‌شود.
-        if (name == null && brand == null && model == null && priceText == null && voice == null) continue;
+        if (name == null &&
+            brand == null &&
+            model == null &&
+            priceText == null &&
+            voice == null &&
+            group == null) {
+          continue;
+        }
 
         final price = _parsePrice(at(pI));
         final reasons = <String>[];
@@ -271,7 +317,7 @@ class PriceListImportService {
           if (badMsgs.length < 5) badMsgs.add('ردیف ${r + 1}: ${reasons.join('، ')}');
           continue;
         }
-        out.entries.add(_Entry(name!, brand!, model!, price!, voice));
+        out.entries.add(_Entry(name!, brand!, model!, price!, voice, group: group));
       }
       if (badRows > 0) {
         out.errors.add('شیت «$sheetName»: $badRows ردیف نامعتبر است');
@@ -324,9 +370,39 @@ class PriceListImportService {
     return (brands: newBrands, models: newModels);
   }
 
+  /// وضعیت مجموعه‌های فایل نسبت به دسته‌ی مقصد (فقط می‌خواند).
+  /// ترتیب: به ترتیب اولین ظهور در فایل. نام نمایشی: اولین نوشتار در فایل.
+  Future<_GroupPlan> _planGroups(List<_Entry> entries, int categoryId) async {
+    final dbGroups = await ServiceGroupRepository().getByCategory(categoryId);
+    final byKey = {for (final g in dbGroups) ServiceGroupRepository.nameKey(g.name): g};
+    final order = <String>[];
+    final names = <String, String>{};
+    final rows = <String, int>{};
+    for (final e in entries) {
+      final g = e.group;
+      if (g == null) continue;
+      final k = ServiceGroupRepository.nameKey(g);
+      if (!names.containsKey(k)) {
+        names[k] = g;
+        order.add(k);
+      }
+      rows[k] = (rows[k] ?? 0) + 1;
+    }
+    final lines = <ImportGroupLine>[];
+    final activeIds = <String, int>{};
+    for (final k in order) {
+      final ex = byKey[k];
+      final status = ex == null ? 'new' : (ex.active ? 'exists' : 'inactive');
+      if (ex != null && ex.active) activeIds[k] = ex.id!;
+      lines.add(ImportGroupLine(names[k]!, status, rows[k]!));
+    }
+    return _GroupPlan(lines, activeIds);
+  }
+
   /// تحلیل فایل برای پیش‌نمایش. اگر ساختار مبهم یا ناقص باشد یا ردیف نامعتبر
   /// وجود داشته باشد، [ImportStructureException] پرتاب می‌شود.
-  Future<ImportPreview> analyzeFile(String path) async {
+  /// اگر فایل ستون «مجموعه» دارد، [categoryId] لازم است.
+  Future<ImportPreview> analyzeFile(String path, {int? categoryId}) async {
     final x = _extract(path);
     if (x.errors.isNotEmpty) throw ImportStructureException(x.errors.join('\n'));
     if (x.entries.isEmpty) {
@@ -335,6 +411,17 @@ class PriceListImportService {
           'فایل عریض باید در سرستون نام خدمت یکی از کلمه‌های «خدمات»، «خدمت»، «تعمیرات» یا «شرح» را داشته باشد.');
     }
     final vi = await _newVehicleInfo(x.entries);
+
+    var groups = <ImportGroupLine>[];
+    var withoutGroup = 0;
+    if (x.anyGroupColumn) {
+      if (categoryId == null) {
+        throw const ImportStructureException('برای تشخیص مجموعه‌ها، ابتدا دسته‌بندی مقصد را انتخاب کنید');
+      }
+      groups = (await _planGroups(x.entries, categoryId)).lines;
+      withoutGroup = x.entries.where((e) => e.group == null).length;
+    }
+
     final mode = x.anyLong && x.anyWide
         ? 'ترکیبی (شیت‌هایی با ساختار متفاوت)'
         : (x.anyLong ? 'طولی (هر ردیف: یک خدمت برای یک برند و مدل)' : 'عریض (برندها در ستون‌ها)');
@@ -346,6 +433,7 @@ class PriceListImportService {
               'model': e.model,
               'price': e.price,
               'voice': e.voiceLabel,
+              'group': e.group,
             })
         .toList();
     return ImportPreview(
@@ -355,6 +443,9 @@ class PriceListImportService {
       newBrands: vi.brands,
       newModels: vi.models,
       ignoredColumns: x.ignored.toList(),
+      hasGroupColumn: x.anyGroupColumn,
+      groups: groups,
+      rowsWithoutGroup: withoutGroup,
     );
   }
 
@@ -370,9 +461,10 @@ class PriceListImportService {
 
   Future<int> countEntries(String path) async => _extract(path).entries.length;
 
-  Future<({int services, int brands})> importFromFile({
+  Future<({int services, int brands, int groups})> importFromFile({
     required String path,
     required int categoryId,
+    GroupImportChoice? groupChoice,
   }) async {
     // قبل از شروع، فعال بودن دسته‌ی مقصد را از دیتابیس چک می‌کنیم (ممکن است بعد از باز شدن صفحه بایگانی شده باشد).
     if (!await ServiceCategoryRepository().isActive(categoryId)) {
@@ -386,6 +478,30 @@ class PriceListImportService {
     if (entries.isEmpty) {
       throw StateError(
           'هیچ ردیف معتبری در فایل پیدا نشد. مطمئن شوید سرستون یکی از سلول‌های سطر اول شامل کلمه‌ی «خدمات»، «خدمت»، «تعمیرات» یا «شرح» است.');
+    }
+
+    // مجموعه‌ها: قبل از هر نوشتن بررسی می‌شود.
+    final gp = await _planGroups(entries, categoryId);
+    final inactive = [for (final l in gp.lines) if (l.status == 'inactive') l.name];
+    if (inactive.isNotEmpty) {
+      throw ImportStructureException(
+          'مجموعه‌ی غیرفعال در فایل: ${inactive.join('، ')}. ابتدا آن را فعال کنید یا نام را در فایل عوض کنید. هیچ چیزی وارد نشد.');
+    }
+    final hasNew = gp.lines.any((l) => l.status == 'new');
+    if (hasNew && groupChoice == null) {
+      throw const ImportStructureException(
+          'برای مجموعه‌های جدید یکی از «ساخت مجموعه‌های جدید» یا «ورود بدون مجموعه» را انتخاب کنید. هیچ چیزی وارد نشد.');
+    }
+    final groupIdByKey = Map<String, int>.from(gp.activeIdByKey);
+    var groupsCreated = 0;
+    if (hasNew && groupChoice == GroupImportChoice.create) {
+      final groupRepo = ServiceGroupRepository();
+      for (final l in gp.lines) {
+        if (l.status != 'new') continue;
+        final id = await groupRepo.add(categoryId, l.name);
+        groupIdByKey[ServiceGroupRepository.nameKey(l.name)] = id;
+        groupsCreated++;
+      }
     }
 
     final existingBrands = await _vehicleRepo.getAllBrands();
@@ -444,12 +560,16 @@ class PriceListImportService {
       }
       codeNumber++;
 
+      final g = entry.group;
+      final groupId = g == null ? null : groupIdByKey[ServiceGroupRepository.nameKey(g)];
+
       await _serviceRepo.insert(ServiceItem(
         name: name,
         code: code,
         categoryId: categoryId,
         brandId: brandId,
         modelId: modelId,
+        serviceGroupId: groupId,
         price: price,
         notes: 'وارد‌شده از فایل نرخ‌نامه',
         voiceSearchLabel: entry.voiceLabel,
@@ -457,6 +577,6 @@ class PriceListImportService {
       servicesAdded++;
     }
 
-    return (services: servicesAdded, brands: brandsAdded);
+    return (services: servicesAdded, brands: brandsAdded, groups: groupsCreated);
   }
 }
