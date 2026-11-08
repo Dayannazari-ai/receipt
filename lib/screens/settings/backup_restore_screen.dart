@@ -19,6 +19,11 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
 
   void _showMsg(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
+  /// Backup خدمات یا کامل که مجموعه‌های خدمات را ندارد (ساخته‌شده قبل از نسخه‌ی ۱۵).
+  bool _lacksGroups(BackupEnvelope e) =>
+      (e.backupType == BackupType.services || e.backupType == BackupType.full) &&
+      e.data['service_groups'] is! List;
+
   // ==================== Export ====================
 
   Future<void> _doExport(BackupType type) async {
@@ -216,6 +221,15 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
+            if (_lacksGroups(envelope)) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'هشدار: این Backup قدیمی است و «مجموعه‌های خدمات» را ندارد. '
+                'در «افزودن»، خدمات بدون مجموعه اضافه می‌شوند و مجموعه‌های فعلی دست‌نخورده می‌مانند. '
+                'در «جایگزینی کامل»، مجموعه‌های فعلی و انتساب آن‌ها به خدمات پاک می‌شود و خدمات بدون مجموعه برمی‌گردند.',
+                style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold),
+              ),
+            ],
             const SizedBox(height: 16),
             const Text('حالت بازیابی را انتخاب کنید:', style: TextStyle(fontWeight: FontWeight.bold)),
           ]),
@@ -249,6 +263,13 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
                 'این عملیات اطلاعات فعلی بخش «${envelope.backupType.label}» را حذف کرده و اطلاعات Backup را جایگزین می‌کند.',
                 style: const TextStyle(color: Colors.red),
               ),
+            if (replace && _lacksGroups(envelope)) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'این Backup مجموعه‌های خدمات را ندارد؛ بعد از جایگزینی، مجموعه‌های فعلی و انتساب آن‌ها به خدمات پاک می‌شود.',
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              ),
+            ],
             const SizedBox(height: 10),
             const Text('آیا مطمئن هستید که می‌خواهید این Backup را بازیابی کنید؟',
                 style: TextStyle(fontWeight: FontWeight.bold)),
