@@ -1115,6 +1115,666 @@ class BackupService {
   /// خود envelope.backupType خوانده می‌شود؛ هر نوع فقط جدول‌های مرتبط با
   /// خودش را لمس می‌کند. کل عملیات در یک تراکنش است: یا همه موفق می‌شوند
   /// یا هیچ‌کدام (Transaction-safe).
-  ///
-  /// نکته: در حالت افزودن برای نوع «کامل»، مقادیر تنظیمات/قالب/مهر تغییر
-  /// نمی‌کنند (فقط شماره کارت/شبای جدید اضا
+  ///  /// نکته: در حالت افزودن برای نوع «کامل»، مقادیر تنظیمات/قالب/مهر تغییر
+  /// نمی‌کنند (فقط شماره کارت/شبای جدید اضافه می‌شود). برای نوع «تنظیمات» این
+  /// بازنویسی انجام می‌شود.
+  Future<void> _runMerge(Database db, BackupEnvelope envelope, RestoreReport report) async {
+    final data = envelope.data;
+
+    await db.transaction((txn) async {
+      switch (envelope.backupType) {
+        case BackupType.customers:
+          final refMaps = await _mergeBrandsAndModels(
+              txn, _list(data, 'vehicle_brands'), _list(data, 'vehicle_models'), report);
+          await _mergeCustomersAndVehicles(
+              txn, _list(data, 'customers'), _list(data, 'vehicles'), report, refMaps);
+          break;
+
+        case BackupType.products:
+          await _mergeProducts(txn, _list(data, 'products'), report);
+          break;
+
+        case BackupType.services:
+          final refMaps = await _mergeBrandsAndModels(
+              txn, _list(data, 'vehicle_brands'), _list(data, 'vehicle_models'), report);
+          await _mergeServices(
+            txn,
+            _list(data, 'services'),
+            _list(data, 'service_categories'),
+            _list(data, 'service_price_history'),
+            report,
+            refMaps,
+            rawGroups: _list(data, 'service_groups'),
+          );
+          break;
+
+        case BackupType.invoices:
+          final refMaps = await _mergeBrandsAndModels(
+              txn, _list(data, 'vehicle_brands'), _list(data, 'vehicle_models'), report);
+          final customerIdMap = await _mergeCustomersAndVehicles(
+              txn, _list(data, 'related_customers'), _list(data, 'related_vehicles'), report, refMaps);
+          final vehicleIdMap = await _buildVehicleIdMapAfterMerge(
+              txn, _list(data, 'related_vehicles'), customerIdMap, refMaps);
+          await _mergeInvoices(
+            txn,
+            _list(data, 'invoices'),
+            _list(data, 'invoice_items'),
+            _list(data, 'side_costs'),
+            customerIdMap,
+            vehicleIdMap,
+            const {},
+            const {},
+            report,
+          );
+          await mergeInvoicePayments(txn, _list(data, 'invoice_payments'), _lastInvoiceIdMap, report);
+          break;
+
+        case BackupType.settings:
+          await _restoreSettingsPart(txn, data, report, overwriteValues: true, replaceAccounts: false);
+          break;
+
+        case BackupType.full:
+          final refMaps = await _mergeBrandsAndModels(
+              txn, _list(data, 'vehicle_brands'), _list(data, 'vehicle_models'), report);
+          final customerIdMap = await _mergeCustomersAndVehicles(
+              txn, _list(data, 'customers'), _list(data, 'vehicles'), report, refMaps);
+          final vehicleIdMap =
+              await _buildVehicleIdMapAfterMerge(txn, _list(data, 'vehicles'), customerIdMap, refMaps);
+          final productIdMap = await _mergeProducts(txn, _list(data, 'products'), report);
+          final serviceIdMap = await _mergeServices(
+            txn,
+            _list(data, 'services'),
+            _list(data, 'service_categories'),
+            _list(data, 'service_price_history'),
+            report,
+            refMaps,
+            rawGroups: _list(data, 'service_groups'),
+          );
+          await _mergeInvoices(
+            txn,
+            _list(data, 'invoices'),
+            _list(data, 'invoice_items'),
+            _list(data, 'side_costs'),
+            customerIdMap,
+            vehicleIdMap,
+            productIdMap,
+            serviceIdMap,
+            report,
+          );
+          await mergeInvoicePayments(txn, _list(data, 'invoice_payments'), _lastInvoiceIdMap, report);
+          await _mergeFinance(txn, _list(data, 'finance_accounts'), _list(data, 'finance_transactions'), report);
+          await _mergeFinanceCheques(
+              txn, _list(data, 'finance_cheques'), _list(data, 'finance_transactions'), report);
+          await mergeServiceExpenses(txn, _list(data, 'service_expenses'), report);
+          await _restoreSettingsPart(txn, data, report, overwriteValues: false, replaceAccounts: false);
+          report.notes.add('در حالت «افزودن»، تنظیمات برنامه تغییر نکرد.');
+          break;
+      }
+    });
+  }
+
+  // ==================== نقطه‌ی ورود اصلی: Restore با حالت Replace ====================
+
+  /// جایگزینی کامل بخش انتخاب‌شده. قبل از حذف، یک Backup ایمنی از همان
+  /// بخش گرفته می‌شود. عملیات در یک تراکنش است: یا کامل انجام می‌شود یا
+  /// هیچ تغییری اعمال نمی‌شود. شناسه‌های اصلی رکوردها حفظ می‌شوند و بررسی
+  /// کلید خارجی تا لحظه‌ی Commit به تعویق می‌افتد؛ اگر در پایان رکوردی به
+  /// داده‌ی ناموجود اشاره کند، کل عملیات لغو می‌شود.
+  Future<void> _runReplace(Database db, BackupEnvelope envelope, RestoreReport report) async {
+    final data = envelope.data;
+
+    try {
+      await db.transaction((txn) async {
+        await txn.execute('PRAGMA defer_foreign_keys = ON');
+
+        switch (envelope.backupType) {
+          case BackupType.customers:
+            await txn.delete('vehicles');
+            await txn.delete('customers');
+            final refMaps = await _mergeBrandsAndModels(
+                txn, _list(data, 'vehicle_brands'), _list(data, 'vehicle_models'), report);
+            for (final rawC in _list(data, 'customers')) {
+              await _insertRaw(txn, 'customers', Map<String, dynamic>.from(rawC as Map), keepId: true);
+              report.customersAdded++;
+            }
+            for (final rawV in _list(data, 'vehicles')) {
+              await _insertRaw(txn, 'vehicles', Map<String, dynamic>.from(rawV as Map),
+                  keepId: true, fkMappings: {'brand_id': refMaps.brands, 'model_id': refMaps.models});
+              report.vehiclesAdded++;
+            }
+            break;
+
+          case BackupType.products:
+            await txn.delete('products');
+            for (final rawP in _list(data, 'products')) {
+              await _insertRaw(txn, 'products', Map<String, dynamic>.from(rawP as Map), keepId: true);
+              report.productsAdded++;
+            }
+            await _cleanupOrphanStockMovements(txn, report);
+            break;
+
+          case BackupType.services:
+            await txn.delete('service_price_history');
+            await txn.delete('services');
+            await txn.delete('service_groups');
+            await txn.delete('service_categories');
+            final refMaps = await _mergeBrandsAndModels(
+                txn, _list(data, 'vehicle_brands'), _list(data, 'vehicle_models'), report);
+            for (final rawCat in _list(data, 'service_categories')) {
+              await _insertRaw(txn, 'service_categories', Map<String, dynamic>.from(rawCat as Map), keepId: true);
+            }
+            for (final rawG in _list(data, 'service_groups')) {
+              await _insertRaw(txn, 'service_groups', _groupMap(rawG), keepId: true);
+            }
+            for (final rawS in _list(data, 'services')) {
+              await _insertRaw(txn, 'services', Map<String, dynamic>.from(rawS as Map),
+                  keepId: true, fkMappings: {'brand_id': refMaps.brands, 'model_id': refMaps.models});
+              report.servicesAdded++;
+            }
+            for (final rawH in _list(data, 'service_price_history')) {
+              await _insertRaw(txn, 'service_price_history', Map<String, dynamic>.from(rawH as Map));
+            }
+            break;
+
+          case BackupType.invoices:
+            await txn.delete('side_costs');
+            await txn.delete('invoice_items');
+            await txn.delete('invoices');
+            // مشتری/خودروهای همراه در حالت Replace فاکتورها حذف نمی‌شوند؛
+            // فقط در صورت نبودشان اضافه می‌شوند.
+            final refMaps = await _mergeBrandsAndModels(
+                txn, _list(data, 'vehicle_brands'), _list(data, 'vehicle_models'), report);
+            final customerIdMap = await _mergeCustomersAndVehicles(
+                txn, _list(data, 'related_customers'), _list(data, 'related_vehicles'), report, refMaps);
+            final vehicleIdMap = await _buildVehicleIdMapAfterMerge(
+                txn, _list(data, 'related_vehicles'), customerIdMap, refMaps);
+            for (final rawInv in _list(data, 'invoices')) {
+              await _insertRaw(txn, 'invoices', Map<String, dynamic>.from(rawInv as Map),
+                  keepId: true, fkMappings: {'customer_id': customerIdMap, 'vehicle_id': vehicleIdMap});
+              report.invoicesAdded++;
+            }
+            for (final rawItem in _list(data, 'invoice_items')) {
+              await _insertRaw(txn, 'invoice_items', Map<String, dynamic>.from(rawItem as Map));
+            }
+            for (final rawCost in _list(data, 'side_costs')) {
+              await _insertRaw(txn, 'side_costs', Map<String, dynamic>.from(rawCost as Map));
+            }
+            break;
+
+          case BackupType.settings:
+            await replaceServiceExpenses(txn, data, report);
+            await _restoreSettingsPart(txn, data, report, overwriteValues: true, replaceAccounts: true);
+            break;
+
+          case BackupType.full:
+            // ترتیب حذف: از وابسته‌ترین به مستقل‌ترین.
+            await txn.delete('side_costs');
+            await txn.delete('invoice_items');
+            await txn.delete('invoices');
+            await txn.delete('service_price_history');
+            await txn.delete('services');
+            await txn.delete('service_groups');
+            await txn.delete('service_categories');
+            await txn.delete('products');
+            await txn.delete('vehicles');
+            await txn.delete('customers');
+            // دفتر مالی فقط وقتی جایگزین می‌شود که خود Backup آن را دارد
+            // (Backupهای نسخه‌ی ۱ و ۲ بخش مالی ندارند و دفتر فعلی را
+            // دست‌نخورده می‌گذارند).
+            final hasFinance = data['finance_accounts'] is List;
+            if (hasFinance) {
+              await txn.delete('finance_cheques');
+              await txn.delete('finance_transactions');
+              await txn.delete('finance_accounts');
+            }
+            // برند/مدل فقط وقتی جایگزین می‌شوند که خود Backup آن‌ها را دارد
+            // (Backupهای نسخه‌ی ۱ برند/مدل ندارند).
+            final hasRefData = data['vehicle_brands'] is List;
+            if (hasRefData) {
+              await txn.delete('vehicle_models');
+              await txn.delete('vehicle_brands');
+              for (final rawB in _list(data, 'vehicle_brands')) {
+                await _insertRaw(txn, 'vehicle_brands', Map<String, dynamic>.from(rawB as Map), keepId: true);
+                report.brandsAdded++;
+              }
+              for (final rawM in _list(data, 'vehicle_models')) {
+                await _insertRaw(txn, 'vehicle_models', Map<String, dynamic>.from(rawM as Map), keepId: true);
+                report.modelsAdded++;
+              }
+            }
+            for (final rawC in _list(data, 'customers')) {
+              await _insertRaw(txn, 'customers', Map<String, dynamic>.from(rawC as Map), keepId: true);
+              report.customersAdded++;
+            }
+            for (final rawV in _list(data, 'vehicles')) {
+              await _insertRaw(txn, 'vehicles', Map<String, dynamic>.from(rawV as Map), keepId: true);
+              report.vehiclesAdded++;
+            }
+            for (final rawP in _list(data, 'products')) {
+              await _insertRaw(txn, 'products', Map<String, dynamic>.from(rawP as Map), keepId: true);
+              report.productsAdded++;
+            }
+            for (final rawCat in _list(data, 'service_categories')) {
+              await _insertRaw(txn, 'service_categories', Map<String, dynamic>.from(rawCat as Map), keepId: true);
+            }
+            for (final rawG in _list(data, 'service_groups')) {
+              await _insertRaw(txn, 'service_groups', _groupMap(rawG), keepId: true);
+            }
+            for (final rawS in _list(data, 'services')) {
+              await _insertRaw(txn, 'services', Map<String, dynamic>.from(rawS as Map), keepId: true);
+              report.servicesAdded++;
+            }
+            for (final rawH in _list(data, 'service_price_history')) {
+              await _insertRaw(txn, 'service_price_history', Map<String, dynamic>.from(rawH as Map));
+            }
+            for (final rawInv in _list(data, 'invoices')) {
+              await _insertRaw(txn, 'invoices', Map<String, dynamic>.from(rawInv as Map), keepId: true);
+              report.invoicesAdded++;
+            }
+            for (final rawItem in _list(data, 'invoice_items')) {
+              await _insertRaw(txn, 'invoice_items', Map<String, dynamic>.from(rawItem as Map));
+            }
+            for (final rawCost in _list(data, 'side_costs')) {
+              await _insertRaw(txn, 'side_costs', Map<String, dynamic>.from(rawCost as Map));
+            }
+            if (hasFinance) {
+              for (final rawA in _list(data, 'finance_accounts')) {
+                await _insertRaw(txn, 'finance_accounts', Map<String, dynamic>.from(rawA as Map), keepId: true);
+                report.financeAccountsAdded++;
+              }
+              for (final rawT in _list(data, 'finance_transactions')) {
+                await _insertRaw(txn, 'finance_transactions', Map<String, dynamic>.from(rawT as Map),
+                    keepId: true);
+                report.financeTxAdded++;
+              }
+            }
+            await _cleanupOrphanStockMovements(txn, report);
+            if (data['finance_cheques'] is List) {
+              for (final rawQ in _list(data, 'finance_cheques')) {
+                await _insertRaw(txn, 'finance_cheques', Map<String, dynamic>.from(rawQ as Map), keepId: true);
+                report.financeChequesAdded++;
+              }
+            }
+            await _restoreSettingsPart(txn, data, report, overwriteValues: true, replaceAccounts: true);
+            break;
+        }
+      });
+    } on DatabaseException catch (e) {
+      if (e.toString().toUpperCase().contains('FOREIGN KEY')) {
+        throw StateError('جایگزینی انجام نشد و هیچ تغییری اعمال نشد: بعضی اطلاعات فعلی '
+            '(مثل فاکتورها یا موجودی) به رکوردهایی اشاره می‌کنند که در این Backup نیستند. '
+            'حالت «افزودن» را امتحان کنید یا Backup کامل را بازیابی کنید.');
+      }
+      rethrow;
+    }
+  }
+
+  /// حرکت‌های موجودی که کالایشان دیگر وجود ندارد (بعد از جایگزینی محصولات).
+  Future<void> _cleanupOrphanStockMovements(Transaction txn, RestoreReport report) async {
+    final n = await txn.rawDelete('DELETE FROM stock_movements WHERE product_id NOT IN (SELECT id FROM products)');
+    if (n > 0) report.notes.add('$n حرکت موجودی مربوط به کالاهای حذف‌شده پاک شد.');
+  }
+
+  // ==================== اعتبارسنجی، Snapshot اضطراری، Restore آزمایشی ====================
+
+  static const Map<BackupType, List<String>> _requiredKeys = {
+    BackupType.customers: ['customers', 'vehicles'],
+    BackupType.products: ['products'],
+    BackupType.services: ['services', 'service_categories', 'service_price_history'],
+    BackupType.invoices: ['invoices', 'invoice_items', 'side_costs'],
+    BackupType.settings: ['app_settings'],
+    BackupType.full: [
+      'customers',
+      'vehicles',
+      'products',
+      'services',
+      'service_categories',
+      'service_price_history',
+      'invoices',
+      'invoice_items',
+      'side_costs',
+    ],
+  };
+
+  /// نام فارسی هر بخش داخل Backup، برای پیام‌ها و Preview.
+  static String sectionLabel(String key) {
+    const labels = {
+      'customers': 'مشتریان',
+      'vehicles': 'خودروها',
+      'vehicle_brands': 'برندها',
+      'vehicle_models': 'مدل‌ها',
+      'products': 'محصولات',
+      'services': 'خدمات',
+      'service_categories': 'دسته‌بندی خدمات',
+      'service_groups': 'مجموعه خدمات',
+      'service_price_history': 'سوابق قیمت خدمات',
+      'invoices': 'فاکتورها',
+      'invoice_items': 'اقلام فاکتور',
+      'side_costs': 'هزینه‌های جانبی',
+      'payment_accounts': 'شماره کارت/شبا',
+      'app_settings': 'تنظیمات برنامه',
+      'invoice_layout': 'قالب فاکتور',
+      'stamp_image': 'عکس مهر/امضا',
+      'finance_accounts': 'حساب مالی فروش کالا',
+      'finance_transactions': 'تراکنش‌های مالی فروش کالا',
+      'finance_cheques': 'چک‌های حساب مالی فروش کالا',
+      'invoice_payments': 'پرداخت‌ها و چک‌های فاکتور',
+    };
+    return labels[key] ?? key;
+  }
+
+  /// اعتبارسنجی فایل Backup قبل از هر Restore: نسخه، تطابق پسوند با نوع،
+  /// وجود بخش‌های ضروری هر نوع، و تطابق تعداد رکوردها با محتوای واقعی فایل
+  /// (برای تشخیص فایل ناقص یا خراب).
+  BackupValidation validateEnvelope(BackupEnvelope env, {String? path}) {
+    final errors = <String>[];
+    final warnings = <String>[];
+
+    if (env.backupVersion > BackupEnvelope.currentVersion) {
+      errors.add('این Backup با نسخه‌ی جدیدتری از برنامه ساخته شده؛ ابتدا برنامه را به‌روزرسانی کنید.');
+    }
+    if (env.appDbVersion > DatabaseHelper.dbVersion) {
+      errors.add('ساختار دیتابیس این Backup جدیدتر از برنامه‌ی فعلی است؛ ابتدا برنامه را به‌روزرسانی کنید.');
+    }
+    if (env.backupVersion < BackupEnvelope.currentVersion) {
+      warnings.add('این Backup با نسخه‌ی قدیمی‌تری ساخته شده و ممکن است برخی بخش‌ها '
+          '(برند/مدل، تنظیمات، قالب فاکتور یا حساب مالی فروش کالا) را نداشته باشد؛ بخش‌های ناموجود دست‌نخورده می‌مانند.');
+    }
+
+    if (path != null) {
+      final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
+      for (final t in BackupType.values) {
+        if (t.fileExtension == ext && t != env.backupType) {
+          errors.add('پسوند فایل (${t.label}) با نوع واقعی داخل آن (${env.backupType.label}) مطابقت ندارد.');
+        }
+      }
+    }
+
+    for (final key in _requiredKeys[env.backupType] ?? const <String>[]) {
+      final v = env.data[key];
+      final ok = key == 'app_settings' ? v is Map : v is List;
+      if (!ok) errors.add('بخش «${sectionLabel(key)}» در فایل نیست یا خراب است.');
+    }
+
+    env.recordCounts.forEach((key, count) {
+      if (key == 'invoice_layout' || key == 'stamp_image') {
+        if (count > 0 && !env.data.containsKey(key)) {
+          errors.add('بخش «${sectionLabel(key)}» در فایل نیست.');
+        }
+        return;
+      }
+      final v = env.data[key];
+      final actual = v is List ? v.length : (v is Map ? v.length : null);
+      if (actual == null) {
+        if (count > 0) errors.add('بخش «${sectionLabel(key)}» در فایل نیست.');
+      } else if (actual != count) {
+        errors.add('تعداد رکوردهای «${sectionLabel(key)}» با اطلاعات فایل نمی‌خواند (فایل ناقص یا خراب است).');
+      }
+    });
+
+    return BackupValidation(errors: errors, warnings: warnings);
+  }
+
+  /// Backup کامل اضطراری از وضعیت فعلی، قبل از هر Restore. ابتدا در فایل
+  /// موقت نوشته و دوباره خوانده و اعتبارسنجی می‌شود؛ فقط بعد از موفقیت به
+  /// نام نهایی منتقل می‌شود. اگر شکست بخورد، خطا پرتاب می‌شود و Restore
+  /// نباید ادامه پیدا کند. فقط ۱۰ Snapshot آخر نگه داشته می‌شود.
+  Future<File> createPreRestoreSnapshot() async {
+    final envelope = await _buildFullEnvelope();
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory(p.join(docs.path, 'pre_restore_snapshots'));
+    if (!await dir.exists()) await dir.create(recursive: true);
+
+    String two(int n) => n.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final name =
+        'PreRestore_${now.year}-${two(now.month)}-${two(now.day)}_${two(now.hour)}-${two(now.minute)}-${two(now.second)}.${BackupType.full.fileExtension}';
+    final tmp = File(p.join(dir.path, '$name.tmp'));
+    final finalFile = File(p.join(dir.path, name));
+
+    try {
+      await tmp.writeAsString(jsonEncode(envelope.toJson()), flush: true);
+      final check = await readBackupFile(tmp.path);
+      final validation = validateEnvelope(check);
+      if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+      await tmp.rename(finalFile.path);
+    } catch (e) {
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      throw StateError('تهیه‌ی Backup اضطراری ناموفق بود، پس Restore انجام نشد: $e');
+    }
+
+    try {
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.${BackupType.full.fileExtension}'))
+          .toList()
+        ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      for (final f in files.skip(10)) {
+        try {
+          await f.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    return finalFile;
+  }
+
+  /// شمارنده‌ی مشکلات ساختاری دیتابیس. قبل و بعد از Restore گرفته و فقط
+  /// «افزایش» مشکلات گزارش می‌شود تا مشکلات قدیمیِ خود کاربر مانع نشود.
+  Future<Map<String, int>> _integrityCounts(DatabaseExecutor db) async {
+    Future<int> count(String sql) async => Sqflite.firstIntValue(await db.rawQuery(sql)) ?? 0;
+    final fk = await db.rawQuery('PRAGMA foreign_key_check');
+    return {
+      'ارجاع نامعتبر بین جدول‌ها (مثلاً خودرو یا فاکتور بدون مشتری)': fk.length,
+      'خودرو با مدلی که متعلق به برندش نیست': await count(
+          'SELECT COUNT(*) FROM vehicles v JOIN vehicle_models m ON m.id = v.model_id '
+          'WHERE v.brand_id IS NOT NULL AND m.brand_id != v.brand_id'),
+      'خدمت با مدلی که متعلق به برندش نیست': await count(
+          'SELECT COUNT(*) FROM services s JOIN vehicle_models m ON m.id = s.model_id '
+          'WHERE s.brand_id IS NOT NULL AND m.brand_id != s.brand_id'),
+      'قلم فاکتور بدون فاکتور':
+          await count('SELECT COUNT(*) FROM invoice_items WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
+      'هزینه‌ی جانبی بدون فاکتور':
+          await count('SELECT COUNT(*) FROM side_costs WHERE invoice_id NOT IN (SELECT id FROM invoices)'),
+    };
+  }
+
+  List<String> _newIssues(Map<String, int> before, Map<String, int> after) {
+    final out = <String>[];
+    after.forEach((label, n) {
+      final b = before[label] ?? 0;
+      if (n > b) out.add('$label: ${n - b} مورد جدید');
+    });
+    return out;
+  }
+
+  Future<bool> _integrityOk(DatabaseExecutor db) async {
+    final rows = await db.rawQuery('PRAGMA integrity_check');
+    return rows.length == 1 && rows.first.values.first.toString().toLowerCase() == 'ok';
+  }
+
+  /// در حالت جایگزینی، تعداد رکوردهای هر جدولِ جایگزین‌شده باید دقیقاً برابر
+  /// تعداد داخل Backup باشد.
+  Future<List<String>> _countIssues(DatabaseExecutor db, BackupEnvelope env) async {
+    final tables = <String>[];
+    switch (env.backupType) {
+      case BackupType.customers:
+        tables.addAll(['customers', 'vehicles']);
+        break;
+      case BackupType.products:
+        tables.add('products');
+        break;
+      case BackupType.services:
+        tables.addAll(['services', 'service_categories', 'service_price_history']);
+        if (env.data['service_groups'] is List) tables.add('service_groups');
+        break;
+      case BackupType.invoices:
+        tables.addAll(['invoices', 'invoice_items', 'side_costs']);
+        break;
+      case BackupType.settings:
+        break;
+      case BackupType.full:
+        tables.addAll([
+          'customers',
+          'vehicles',
+          'products',
+          'services',
+          'service_categories',
+          'service_price_history',
+          'invoices',
+          'invoice_items',
+          'side_costs',
+        ]);
+        if (env.data['service_groups'] is List) tables.add('service_groups');
+        if (env.data['vehicle_brands'] is List) tables.addAll(['vehicle_brands', 'vehicle_models']);
+        if (env.data['payment_accounts'] is List) tables.add('payment_accounts');
+        if (env.data['finance_accounts'] is List) tables.addAll(['finance_accounts', 'finance_transactions']);
+        if (env.data['finance_cheques'] is List) tables.add('finance_cheques');
+        break;
+    }
+    final issues = <String>[];
+    for (final t in tables) {
+      final expected = env.recordCounts[t];
+      if (expected == null) continue;
+      final actual = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
+      if (actual != expected) {
+        issues.add('تعداد «${sectionLabel(t)}» بعد از بازیابی ($actual) با Backup ($expected) برابر نیست.');
+      }
+    }
+    return issues;
+  }
+
+  Future<RestoreReport> _execute(Database db, BackupEnvelope env, RestoreMode mode,
+      {required bool applyExtras}) async {
+    final report = RestoreReport();
+    final isSettings = env.backupType == BackupType.settings;
+    final replace = !isSettings && mode == RestoreMode.replace;
+    if (replace) {
+      await _runReplace(db, env, report);
+    } else {
+      await _runMerge(db, env, report);
+    }
+    if (applyExtras && (isSettings || (replace && env.backupType == BackupType.full))) {
+      await _applySettingsExtras(env.data, report);
+    }
+    return report;
+  }
+
+  /// Restore آزمایشی روی یک کپی ایزوله از دیتابیس فعلی (فایل موقت). هیچ
+  /// تغییری روی اطلاعات واقعی ایجاد نمی‌کند. مشکلات پیداشده در
+  /// report.issues می‌آید؛ اگر خالی نبود، Restore واقعی نباید انجام شود.
+  Future<RestoreReport> dryRun(BackupEnvelope env, RestoreMode mode) async {
+    await _db.database;
+    final tmpDir = await getTemporaryDirectory();
+    final tmpPath = p.join(tmpDir.path, 'restore_dryrun_${DateTime.now().millisecondsSinceEpoch}.db');
+    await File(await _db.getDbFilePath()).copy(tmpPath);
+    Database? tmpDb;
+    try {
+      tmpDb = await openDatabase(tmpPath, onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'));
+      final before = await _integrityCounts(tmpDb);
+      final report = await _execute(tmpDb, env, mode, applyExtras: false);
+      report.issues.addAll(_newIssues(before, await _integrityCounts(tmpDb)));
+      final isReplace = env.backupType != BackupType.settings && mode == RestoreMode.replace;
+      if (isReplace) report.issues.addAll(await _countIssues(tmpDb, env));
+      if (!await _integrityOk(tmpDb)) report.issues.add('بررسی سلامت دیتابیس در Restore آزمایشی خطا داد.');
+      return report;
+    } finally {
+      try {
+        await tmpDb?.close();
+      } catch (_) {}
+      for (final suffix in ['', '-journal', '-wal', '-shm']) {
+        try {
+          final f = File('$tmpPath$suffix');
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// Restore واقعی. همیشه ابتدا اعتبارسنجی می‌شود و قبل از هر تغییر یک
+  /// Snapshot اضطراری وجود دارد (اگر [snapshot] داده نشود همین‌جا ساخته
+  /// می‌شود و شکستش Restore را متوقف می‌کند). بعد از Restore، اعتبارسنجی
+  /// خودکار انجام و مشکلات در report.issues گزارش می‌شود.
+  /// بازیابی تنظیمات حالت افزودن/جایگزینی ندارد و همیشه یک رفتار دارد.
+  Future<RestoreReport> restore(BackupEnvelope envelope, RestoreMode mode, {File? snapshot}) async {
+    final validation = validateEnvelope(envelope);
+    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+
+    final snap = snapshot ?? await createPreRestoreSnapshot();
+    final db = await _db.database;
+    final before = await _integrityCounts(db);
+
+    final report = await _execute(db, envelope, mode, applyExtras: true);
+    report.snapshotPath = snap.path;
+
+    report.issues.addAll(_newIssues(before, await _integrityCounts(db)));
+    final isReplace = envelope.backupType != BackupType.settings && mode == RestoreMode.replace;
+    if (isReplace) report.issues.addAll(await _countIssues(db, envelope));
+    if (!await _integrityOk(db)) report.issues.add('بررسی سلامت فایل دیتابیس خطا داد.');
+    return report;
+  }
+
+  /// برگشت به وضعیت قبل از Restore با استفاده از Snapshot اضطراری (که یک
+  /// Backup کامل است و با جایگزینی کامل بازیابی می‌شود).
+  Future<RestoreReport> rollbackToSnapshot(File snapshot) async {
+    final env = await readBackupFile(snapshot.path);
+    final validation = validateEnvelope(env);
+    if (!validation.isValid) throw StateError(validation.errors.join('\n'));
+    final db = await _db.database;
+    return _execute(db, env, RestoreMode.replace, applyExtras: true);
+  }
+
+  // ==================== به‌روزرسانی یک Backup موجود ====================
+
+  /// به‌روزرسانی یک فایل Backup موجود با وضعیت فعلی دیتابیس: Export تازه از
+  /// وضعیت فعلی و بازنویسی همان فایل؛ createdAt اصلی حفظ و فقط updatedAt
+  /// تغییر می‌کند.
+  Future<File> updateExistingBackup(String existingFilePath) async {
+    final oldEnvelope = await readBackupFile(existingFilePath);
+    final fresh = await exportByType(oldEnvelope.backupType);
+    final freshContent = await fresh.readAsString();
+    final freshJson = jsonDecode(freshContent) as Map<String, dynamic>;
+    final freshEnvelope = BackupEnvelope.fromJson(freshJson);
+
+    final merged = BackupEnvelope(
+      backupType: freshEnvelope.backupType,
+      appDbVersion: freshEnvelope.appDbVersion,
+      createdAt: oldEnvelope.createdAt, // تاریخ ایجاد اصلی حفظ می‌شود
+      updatedAt: DateTime.now().toIso8601String(),
+      recordCounts: freshEnvelope.recordCounts,
+      data: freshEnvelope.data,
+    );
+
+    await File(existingFilePath).writeAsString(jsonEncode(merged.toJson()));
+    // فایل موقت exportByType دیگر لازم نیست.
+    try {
+      await fresh.delete();
+    } catch (_) {}
+    return File(existingFilePath);
+  }
+
+  // ==================== سازگاری با نسخه‌ی قدیمی (فایل .db کامل) ====================
+
+  Future<File> createLegacyFullDbBackup() async {
+    await _db.database;
+    final dbPath = await _db.getDbFilePath();
+    final dbFile = File(dbPath);
+    if (!await dbFile.exists()) throw StateError('فایل دیتابیس یافت نشد');
+    final backupDir = await getApplicationDocumentsDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final backupPath = '${backupDir.path}/receipt_backup_$timestamp.db';
+    return dbFile.copy(backupPath);
+  }
+
+  Future<void> restoreLegacyFullDbFromPath(String pickedPath) async {
+    final dbPath = await _db.getDbFilePath();
+    await _db.close();
+    final pickedFile = File(pickedPath);
+    if (!await pickedFile.exists()) throw StateError('فایل یافت نشد');
+    await pickedFile.copy(dbPath);
+    await _db.database;
+  }
+}
