@@ -129,4 +129,76 @@ class VehicleReferenceRepository {
     'Kia': ['ریو', 'سراتو', 'پیکانتو', 'ایبروس', 'اپتیما', 'کادنزا', 'سورنتو 3500', 'سورنتو 2400', 'اسپورتیج', 'موهاوی 8 سیلندر', 'موهاوی 6 سیلندر', 'سراتو وارداتی'],
     'Hyundai': ['i10', 'i20', 'i30', 'i40', 'النترا', 'اکسنت', 'توسان 2400', 'توسان 2700', 'ix35', 'آوانته', 'آزرا 3300', 'سانتافه 3500', 'سانتافه 2700', 'سانتافه 2400', 'جنسیس', 'وراکروز ix55', 'سوناتا 6 سیلندر اتوماتیک NF', 'سوناتا 4 سیلندر NF.YF.LF', 'ولستر', 'کوپه 2700'],
     'Chery': ['آریزو', 'A11', 'کوین', 'تیگو 5', 'تیگو 7', 'آریزو 5', 'آریزو 6'],
-    'MVM': ['110', '110S', 'X22', 'X33', 'X33S', '315', '315S', '530', '
+    'MVM': ['110', '110S', 'X22', 'X33', 'X33S', '315', '315S', '530', '550'],
+    'Lifan': ['520', '820', 'X70', '620', 'X60', 'X50'],
+    'JAC': ['J3', 'J4', 'J5', 'S3', 'S5'],
+    'Brilliance': ['H220', 'H230', 'H320', 'H320 Cross', 'H330', '1500cc', '1600cc'],
+    'Bahman': ['دلیکا', 'کاپرا', 'فیدلیتی'],
+    'Mazda': ['2000', '323', 'کارا', '3', '3 نیو', '2', 'وانت', '323 اتوماتیک'],
+    'Geely': ['ام‌گرند EC7', 'ام‌گرند EC718', 'ام‌گرند X7', 'GC6'],
+    'Nissan': ['وانت', 'قشقایی', 'مورانو', 'جوک', 'ایکس تریل', 'تیانا', 'ماکسیما', 'پاترول', 'پیکاپ', 'سرانزا', 'رونیز', 'پت فایندر', 'پیکاپ ریچ'],
+    'Dongfeng': ['H30 کراس'],
+    'Toyota': ['کمری', 'لندکروز', 'پرادو', 'هایلوکس', 'هایس'],
+    'Daewoo': ['ماتیز', 'اسپرو', 'ریسو', 'سیلو'],
+    'Suzuki': ['ویتارا'],
+  };
+
+  /// نرمال‌سازی نام برای مقایسه: ی/ي، ک/ك، نیم‌فاصله، فاصله، کشیده، ارقام و حروف.
+  static String _norm(String s) {
+    const fa = '۰۱۲۳۴۵۶۷۸۹';
+    const ar = '٠١٢٣٤٥٦٧٨٩';
+    var t = s
+        .toLowerCase()
+        .replaceAll('ي', 'ی')
+        .replaceAll('ك', 'ک')
+        .replaceAll('\u200c', '')
+        .replaceAll('\u200f', '')
+        .replaceAll('ـ', '')
+        .replaceAll(' ', '');
+    for (var i = 0; i < 10; i++) {
+      t = t.replaceAll(fa[i], '$i').replaceAll(ar[i], '$i');
+    }
+    return t;
+  }
+
+  Future<void> ensureDefaults() async {
+    final prefs = await SharedPreferences.getInstance();
+    final all = await getAllBrands(includeDeleted: true);
+    if (all.isEmpty) {
+      await _seedDefaults();
+      await prefs.setBool(_renameDoneKey, true);
+      return;
+    }
+    if (prefs.getBool(_renameDoneKey) == true) return;
+    await _renameLegacyBrands(all);
+    await prefs.setBool(_renameDoneKey, true);
+  }
+
+  Future<void> _seedDefaults() async {
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      for (final entry in _defaultBrands.entries) {
+        final brandId = await txn.insert('vehicle_brands', {'name': entry.key});
+        for (final model in entry.value) {
+          await txn.insert('vehicle_models', {'brand_id': brandId, 'name': model});
+        }
+      }
+    });
+  }
+
+  Future<void> _renameLegacyBrands(List<VehicleBrand> all) async {
+    final active = await getAllBrands();
+    for (final e in _legacyRenames.entries) {
+      final newKey = _norm(e.value);
+      if (all.any((b) => _norm(b.name) == newKey)) continue;
+      final oldKey = _norm(e.key);
+      for (final b in active) {
+        if (_norm(b.name) != oldKey) continue;
+        final int? id = b.id;
+        if (id == null) continue;
+        await updateBrand(id, e.value);
+        break;
+      }
+    }
+  }
+}
