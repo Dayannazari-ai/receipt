@@ -12,6 +12,7 @@ import '../../models/app_settings.dart';
 import '../../repositories/customer_repository.dart';
 import '../../repositories/product_repository.dart';
 import '../../repositories/service_repository.dart';
+import '../../repositories/service_group_repository.dart';
 import '../../repositories/vehicle_reference_repository.dart';
 import '../../repositories/payment_account_repository.dart';
 import '../../repositories/settings_repository.dart';
@@ -1130,28 +1131,41 @@ class _ServicePickerSheet extends StatefulWidget {
 class _ServicePickerSheetState extends State<_ServicePickerSheet> {
   final _serviceRepo = ServiceRepository();
   final _vehicleRepo = VehicleReferenceRepository();
+  final _categoryRepo = ServiceCategoryRepository();
+  final _groupRepo = ServiceGroupRepository();
   final _searchCtrl = TextEditingController();
   List<ServiceItem> _allResults = [];
   List<ServiceItem> _results = [];
+  List<ServiceCategory> _categories = [];
+  List<ServiceGroup> _groups = [];
   List<VehicleBrand> _brands = [];
   List<VehicleModel> _models = [];
   Map<int, String> _brandNames = {};
   Map<int, String> _modelNames = {};
+  int? _filterCategoryId;
+  int? _filterGroupId;
   int? _filterBrandId;
   int? _filterModelId;
   ServiceItem? _selected;
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
 
-  // ---- حالت انتخاب گروهی (جدید) ----
+  // ---- حالت انتخاب گروهی ----
+  // انتخاب‌ها با تغییر فیلتر/جستجو حفظ می‌شوند.
   bool _multiSelectMode = false;
-  final Set<int> _multiSelectedIds = {};
+  final Map<int, ServiceItem> _multiSelected = {};
 
   @override
   void initState() {
     super.initState();
+    _loadCategories();
     _loadBrands();
     _search('');
+  }
+
+  Future<void> _loadCategories() async {
+    final cats = await _categoryRepo.getAll();
+    if (mounted) setState(() => _categories = cats);
   }
 
   Future<void> _loadBrands() async {
@@ -1164,11 +1178,26 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
         modelNames[m.id!] = m.name;
       }
     }
-    if (mounted) setState(() {
-      _brands = brands;
-      _brandNames = brandNames;
-      _modelNames = modelNames;
+    if (mounted) {
+      setState(() {
+        _brands = brands;
+        _brandNames = brandNames;
+        _modelNames = modelNames;
+      });
+    }
+  }
+
+  Future<void> _onCategoryFilterChanged(int? categoryId) async {
+    setState(() {
+      _filterCategoryId = categoryId;
+      _filterGroupId = null;
+      _groups = [];
     });
+    _applyFilter();
+    if (categoryId == null) return;
+    final groups = await _groupRepo.getByCategory(categoryId);
+    if (!mounted || _filterCategoryId != categoryId) return;
+    setState(() => _groups = groups);
   }
 
   Future<void> _onBrandFilterChanged(int? brandId) async {
@@ -1186,6 +1215,12 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
 
   void _applyFilter() {
     var list = _allResults;
+    if (_filterCategoryId != null) {
+      list = list.where((s) => s.categoryId == _filterCategoryId).toList();
+    }
+    if (_filterGroupId != null) {
+      list = list.where((s) => s.serviceGroupId == _filterGroupId).toList();
+    }
     if (_filterBrandId != null) {
       list = list.where((s) => s.brandId == null || s.brandId == _filterBrandId).toList();
     }
@@ -1222,24 +1257,25 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
   void _toggleMultiSelectMode() {
     setState(() {
       _multiSelectMode = !_multiSelectMode;
-      _multiSelectedIds.clear();
+      _multiSelected.clear();
     });
   }
 
-  void _toggleChecked(int id, bool? checked) {
+  void _toggleChecked(ServiceItem s, bool? checked) {
+    final id = s.id;
+    if (id == null) return;
     setState(() {
       if (checked == true) {
-        _multiSelectedIds.add(id);
+        _multiSelected[id] = s;
       } else {
-        _multiSelectedIds.remove(id);
+        _multiSelected.remove(id);
       }
     });
   }
 
   void _confirmMultiSelect() {
-    if (_multiSelectedIds.isEmpty) return;
-    final chosen = _results.where((s) => _multiSelectedIds.contains(s.id)).toList();
-    final lines = chosen
+    if (_multiSelected.isEmpty) return;
+    final lines = _multiSelected.values
         .map((s) => InvoiceCartLine(
               itemType: InvoiceItemType.service,
               serviceId: s.id,
@@ -1278,6 +1314,41 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
                 Row(children: [
                   Expanded(
                     child: DropdownButtonFormField<int?>(
+                      value: _categories.any((c) => c.id == _filterCategoryId) ? _filterCategoryId : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'دسته‌بندی', isDense: true),
+                      items: [
+                        const DropdownMenuItem<int?>(value: null, child: Text('همه دسته‌ها')),
+                        ..._categories.map((c) => DropdownMenuItem<int?>(value: c.id, child: Text(c.name))),
+                      ],
+                      onChanged: _onCategoryFilterChanged,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
+                      key: ValueKey('pg-$_filterCategoryId-$_filterGroupId-${_groups.length}'),
+                      value: _groups.any((g) => g.id == _filterGroupId) ? _filterGroupId : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'مجموعه', isDense: true),
+                      items: [
+                        const DropdownMenuItem<int?>(value: null, child: Text('همه مجموعه‌ها')),
+                        ..._groups.map((g) => DropdownMenuItem<int?>(
+                            value: g.id, child: Text(g.active ? g.name : '${g.name} (غیرفعال)'))),
+                      ],
+                      onChanged: _filterCategoryId == null
+                          ? null
+                          : (v) {
+                              setState(() => _filterGroupId = v);
+                              _applyFilter();
+                            },
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
                       value: _filterBrandId,
                       decoration: const InputDecoration(labelText: 'برند', isDense: true),
                       items: [
@@ -1309,7 +1380,7 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
                   const SizedBox(height: 4),
                   Align(
                     alignment: AlignmentDirectional.centerStart,
-                    child: Text('${_multiSelectedIds.length} مورد انتخاب شده',
+                    child: Text('${_multiSelected.length} مورد انتخاب شده',
                         style: const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
                 ],
@@ -1324,8 +1395,8 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
                             final s = _results[i];
                             if (_multiSelectMode) {
                               return CheckboxListTile(
-                                value: _multiSelectedIds.contains(s.id),
-                                onChanged: (v) => _toggleChecked(s.id!, v),
+                                value: _multiSelected.containsKey(s.id),
+                                onChanged: (v) => _toggleChecked(s, v),
                                 title: Text(s.name),
                                 subtitle: Text(_brandModelLabel(s)),
                                 secondary: Text(CurrencyFormatter.formatPlain(s.price)),
@@ -1343,7 +1414,7 @@ class _ServicePickerSheetState extends State<_ServicePickerSheet> {
                 if (_multiSelectMode) ...[
                   const SizedBox(height: 12),
                   ElevatedButton(
-                    onPressed: _multiSelectedIds.isEmpty ? null : _confirmMultiSelect,
+                    onPressed: _multiSelected.isEmpty ? null : _confirmMultiSelect,
                     child: const Text('تأیید و افزودن به فاکتور'),
                   ),
                 ],
