@@ -111,12 +111,31 @@ class VehicleReferenceRepository {
   // «برلیانس» یا «دانگ‌فنگ» وجود داشته باشد، نامش به Brilliance و Dongfeng
   // تغییر می‌کند (همان رکورد، پس خدمات/خودروها/فاکتورها سالم می‌مانند).
   // اگر برند هم‌نام انگلیسی از قبل وجود داشته باشد، هیچ تغییری داده نمی‌شود.
+  //
+  // ادغام برندهای فارسی (فقط یک بار، نصب قدیمی): هشت برند فارسی شناخته‌شده
+  // (ایران‌خودرو، تویوتا، رنو، سایپا، سیتروئن، مزدا، پژو، کیا) با برند
+  // انگلیسی هم‌نامشان یکی می‌شوند: مدل‌ها، خدمات و خودروها به برند انگلیسی
+  // منتقل می‌شوند (مدل هم‌نام یکی می‌شود). اگر برند انگلیسی وجود نداشته باشد،
+  // خود برند فارسی به نام انگلیسی تغییر نام می‌دهد. هیچ خدمت، قیمت، کد،
+  // خودرو یا فاکتوری حذف یا بازنویسی نمی‌شود؛ همه‌چیز در یک تراکنش است.
 
   static const String _renameDoneKey = 'vehicle_brand_rename_v1_done';
+  static const String _mergeDoneKey = 'vehicle_brand_merge_v1_done';
 
   static const Map<String, String> _legacyRenames = {
     'برلیانس': 'Brilliance',
     'دانگ‌فنگ': 'Dongfeng',
+  };
+
+  static const Map<String, String> _persianToEnglish = {
+    'ایران‌خودرو': 'IRCO',
+    'تویوتا': 'Toyota',
+    'رنو': 'Renault',
+    'سایپا': 'Saipa',
+    'سیتروئن': 'Citroen',
+    'مزدا': 'Mazda',
+    'پژو': 'Peugeot',
+    'کیا': 'Kia',
   };
 
   static const Map<String, List<String>> _defaultBrands = {
@@ -167,11 +186,22 @@ class VehicleReferenceRepository {
     if (all.isEmpty) {
       await _seedDefaults();
       await prefs.setBool(_renameDoneKey, true);
+      await prefs.setBool(_mergeDoneKey, true);
       return;
     }
-    if (prefs.getBool(_renameDoneKey) == true) return;
-    await _renameLegacyBrands(all);
-    await prefs.setBool(_renameDoneKey, true);
+    if (prefs.getBool(_renameDoneKey) != true) {
+      await _renameLegacyBrands(all);
+      await prefs.setBool(_renameDoneKey, true);
+    }
+    if (prefs.getBool(_mergeDoneKey) != true) {
+      try {
+        await _mergePersianBrands();
+        await prefs.setBool(_mergeDoneKey, true);
+      } catch (_) {
+        // اگر ادغام انجام نشد، تراکنش کامل برگشت خورده و داده دست‌نخورده است؛
+        // پرچم ثبت نمی‌شود تا دفعه‌ی بعد دوباره تلاش شود و برنامه هم باز شود.
+      }
+    }
   }
 
   Future<void> _seedDefaults() async {
@@ -200,5 +230,79 @@ class VehicleReferenceRepository {
         break;
       }
     }
+  }
+
+  /// ادغام یک‌باره‌ی برندهای فارسی با برند انگلیسی هم‌نام (همه در یک تراکنش).
+  Future<void> _mergePersianBrands() async {
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      final brands = await txn.query('vehicle_brands');
+      for (final e in _persianToEnglish.entries) {
+        final pKey = _norm(e.key);
+        final tKey = _norm(e.value);
+        final persian = brands.where((b) => _norm((b['name'] as String?) ?? '') == pKey).toList();
+        if (persian.isEmpty) continue;
+
+        // برند انگلیسی مقصد (ترجیحاً فعال).
+        int? targetId;
+        var targetDeleted = true;
+        for (final b in brands) {
+          if (_norm((b['name'] as String?) ?? '') != tKey) continue;
+          final del = ((b['is_deleted'] as num?)?.toInt() ?? 0) == 1;
+          if (targetId == null || (targetDeleted && !del)) {
+            targetId = (b['id'] as num).toInt();
+            targetDeleted = del;
+          }
+        }
+
+        for (final p in persian) {
+          final pid = (p['id'] as num).toInt();
+          final pDeleted = ((p['is_deleted'] as num?)?.toInt() ?? 0) == 1;
+
+          // برند انگلیسی وجود ندارد: همین رکورد فارسی تغییر نام می‌دهد.
+          if (targetId == null) {
+            await txn.update('vehicle_brands', {'name': e.value}, where: 'id = ?', whereArgs: [pid]);
+            targetId = pid;
+            targetDeleted = pDeleted;
+            continue;
+          }
+          final tid = targetId;
+          if (tid == pid) continue;
+
+          // مدل‌ها: مدل هم‌نام یکی می‌شود، مدل جدید به برند مقصد منتقل می‌شود.
+          final pModels = await txn.query('vehicle_models', where: 'brand_id = ?', whereArgs: [pid]);
+          final tModels = await txn.query('vehicle_models', where: 'brand_id = ?', whereArgs: [tid]);
+          final byName = <String, int>{
+            for (final m in tModels) _norm((m['name'] as String?) ?? ''): (m['id'] as num).toInt(),
+          };
+          for (final m in pModels) {
+            final mid = (m['id'] as num).toInt();
+            final key = _norm((m['name'] as String?) ?? '');
+            final same = byName[key];
+            if (same != null) {
+              await txn.update('services', {'model_id': same}, where: 'model_id = ?', whereArgs: [mid]);
+              await txn.update('vehicles', {'model_id': same}, where: 'model_id = ?', whereArgs: [mid]);
+              await txn.delete('vehicle_models', where: 'id = ?', whereArgs: [mid]);
+            } else {
+              await txn.update('vehicle_models', {'brand_id': tid}, where: 'id = ?', whereArgs: [mid]);
+              byName[key] = mid;
+            }
+          }
+
+          // خدمات و خودروهای برند فارسی به برند انگلیسی می‌روند.
+          await txn.update('services', {'brand_id': tid}, where: 'brand_id = ?', whereArgs: [pid]);
+          await txn.update('vehicles', {'brand_id': tid}, where: 'brand_id = ?', whereArgs: [pid]);
+
+          // اگر برند مقصد حذف منطقی بود ولی برند فارسی فعال بود، مقصد فعال می‌شود.
+          if (targetDeleted && !pDeleted) {
+            await txn.update('vehicle_brands', {'is_deleted': 0}, where: 'id = ?', whereArgs: [tid]);
+            targetDeleted = false;
+          }
+
+          // برند فارسی دیگر هیچ وابستگی ندارد.
+          await txn.delete('vehicle_brands', where: 'id = ?', whereArgs: [pid]);
+        }
+      }
+    });
   }
 }
