@@ -373,6 +373,23 @@ class ServiceRepository {
         where: 'category_id = ? AND is_deleted = 0', whereArgs: [categoryId], orderBy: 'name');
     return rows.map((r) => ServiceItem.fromMap(r)).toList();
   }
+    /// تعداد خدمات (حذف‌نشده) هر مجموعه. فقط می‌خواند؛ یک پرس‌وجوی GROUP BY.
+  Future<Map<int, int>> countByGroup() async {
+    final db = await _db.database;
+    final rows = await db.rawQuery(
+        'SELECT service_group_id AS k, COUNT(*) AS c FROM services '
+        'WHERE is_deleted = 0 AND service_group_id IS NOT NULL GROUP BY service_group_id');
+    return {for (final r in rows) (r['k'] as num).toInt(): (r['c'] as num).toInt()};
+  }
+
+  /// تعداد خدمات (حذف‌نشده) اختصاصی هر مدل. فقط می‌خواند.
+  Future<Map<int, int>> countByModel() async {
+    final db = await _db.database;
+    final rows = await db.rawQuery(
+        'SELECT model_id AS k, COUNT(*) AS c FROM services '
+        'WHERE is_deleted = 0 AND model_id IS NOT NULL GROUP BY model_id');
+    return {for (final r in rows) (r['k'] as num).toInt(): (r['c'] as num).toInt()};
+  }
 
   /// جستجوی عادی (نام یا کد).
   Future<List<ServiceItem>> search(String q) async {
