@@ -64,6 +64,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
   List<VehicleModel> _models = [];
   Map<int, String> _brandNames = {};
   Map<int, String> _modelNames = {};
+  Map<int, int> _groupCounts = {};
+  Map<int, int> _modelCounts = {};
   Currency _currency = Currency.toman;
   bool _loading = true;
   final _searchCtrl = TextEditingController();
@@ -133,6 +135,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
       }
     }
 
+    final groupCounts = await _serviceRepo.countByGroup();
+    final modelCounts = await _serviceRepo.countByModel(categoryId: catFilter);
     List<VehicleModel> models = [];
     if (_filterBrandId != null) {
       models = await _vehicleRepo.getModelsByBrand(_filterBrandId!);
@@ -154,6 +158,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
       _models = models;
       _brandNames = brandNames;
       _modelNames = modelNames;
+      _groupCounts = groupCounts;
+      _modelCounts = modelCounts;
       _currency = settings.currency;
       _loading = false;
     });
@@ -350,6 +356,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
   }
 
+    /// ارقام را فارسی می‌کند (فقط برای نمایش تعداد).
+  String _fa(int n) {
+    const d = '۰۱۲۳۴۵۶۷۸۹';
+    return n.toString().split('').map((c) => d[int.parse(c)]).join();
+  }
+
   String _brandLabel(ServiceItem s) {
     if (s.brandId == null) return 'همه برندها';
     final name = _brandNames[s.brandId] ?? '؟';
@@ -484,10 +496,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
             Expanded(
               child: DropdownButtonFormField<int?>(
                 value: _filterModelId,
+                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'فیلتر مدل', isDense: true),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('همه مدل‌ها')),
-                  ..._models.map((m) => DropdownMenuItem(value: m.id, child: Text(m.name))),
+                   ..._models.map((m) => DropdownMenuItem(
+                      value: m.id, child: Text('${m.name} (${_fa(_modelCounts[m.id] ?? 0)})'))),
                 ],
                 onChanged: _filterBrandId == null
                     ? null
@@ -970,8 +984,10 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
             decoration: const InputDecoration(labelText: 'مجموعه خدمات'),
             items: [
               const DropdownMenuItem<int?>(value: null, child: Text('بدون مجموعه')),
-              ..._groups.map((g) =>
-                  DropdownMenuItem<int?>(value: g.id, child: Text(g.active ? g.name : '${g.name} (غیرفعال)'))),
+                   ..._groups.map((g) => DropdownMenuItem<int?>(
+                      value: g.id,
+                      child: Text((g.active ? g.name : '${g.name} (غیرفعال)') +
+                          ' (${_fa(_groupCounts[g.id] ?? 0)})'))),
             ],
             onChanged: (v) => setState(() => _groupId = v),
           ),
