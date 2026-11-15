@@ -374,11 +374,13 @@ class ServiceRepository {
     return rows.map((r) => ServiceItem.fromMap(r)).toList();
   }
     /// تعداد خدمات (حذف‌نشده) هر مجموعه. فقط می‌خواند؛ یک پرس‌وجوی GROUP BY.
-  Future<Map<int, int>> countByGroup() async {
+  Future<Map<int, int>> countByModel({int? categoryId}) async {
     final db = await _db.database;
+    final catSql = categoryId == null ? '' : ' AND category_id = ?';
     final rows = await db.rawQuery(
-        'SELECT service_group_id AS k, COUNT(*) AS c FROM services '
-        'WHERE is_deleted = 0 AND service_group_id IS NOT NULL GROUP BY service_group_id');
+        'SELECT model_id AS k, COUNT(*) AS c FROM services '
+        'WHERE is_deleted = 0 AND model_id IS NOT NULL$catSql GROUP BY model_id',
+        categoryId == null ? null : [categoryId]);
     return {for (final r in rows) (r['k'] as num).toInt(): (r['c'] as num).toInt()};
   }
 
