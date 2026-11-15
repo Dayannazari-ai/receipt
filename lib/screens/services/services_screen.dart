@@ -984,7 +984,7 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
             decoration: const InputDecoration(labelText: 'مجموعه خدمات'),
             items: [
               const DropdownMenuItem<int?>(value: null, child: Text('بدون مجموعه')),
-                   ..._groups.map((g) => DropdownMenuItem<int?>(
+                    ..._groups.map((g) => DropdownMenuItem<int?>(
                       value: g.id,
                       child: Text((g.active ? g.name : '${g.name} (غیرفعال)') +
                           ' (${_fa(_groupCounts[g.id] ?? 0)})'))),
