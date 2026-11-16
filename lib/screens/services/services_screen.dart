@@ -356,7 +356,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
   }
 
-    /// ارقام را فارسی می‌کند (فقط برای نمایش تعداد).
+  /// ارقام را فارسی می‌کند (فقط برای نمایش تعداد).
   String _fa(int n) {
     const d = '۰۱۲۳۴۵۶۷۸۹';
     return n.toString().split('').map((c) => d[int.parse(c)]).join();
@@ -459,7 +459,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
                 items: [
                   const DropdownMenuItem<int?>(value: null, child: Text('همه مجموعه‌ها')),
                   ..._groups.map((g) => DropdownMenuItem<int?>(
-                      value: g.id, child: Text(g.active ? g.name : '${g.name} (غیرفعال)'))),
+                      value: g.id,
+                      child: Text((g.active ? g.name : '${g.name} (غیرفعال)') +
+                          ' (${_fa(_groupCounts[g.id] ?? 0)})'))),
                 ],
                 onChanged: _filterCategoryId == null
                     ? null
@@ -496,11 +498,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
             Expanded(
               child: DropdownButtonFormField<int?>(
                 value: _filterModelId,
-                 isExpanded: true,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'فیلتر مدل', isDense: true),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('همه مدل‌ها')),
-                   ..._models.map((m) => DropdownMenuItem(
+                  ..._models.map((m) => DropdownMenuItem(
                       value: m.id, child: Text('${m.name} (${_fa(_modelCounts[m.id] ?? 0)})'))),
                 ],
                 onChanged: _filterBrandId == null
@@ -574,7 +576,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
   }
 }
-
 /// فرم افزودن/ویرایش خدمت با انتخاب کلیکی دسته‌بندی، مجموعه، برند و مدل از بانک اطلاعات.
 class _ServiceFormSheet extends StatefulWidget {
   final List<ServiceCategory> categories;
@@ -984,10 +985,8 @@ class _ServiceFormSheetState extends State<_ServiceFormSheet> {
             decoration: const InputDecoration(labelText: 'مجموعه خدمات'),
             items: [
               const DropdownMenuItem<int?>(value: null, child: Text('بدون مجموعه')),
-                    ..._groups.map((g) => DropdownMenuItem<int?>(
-                      value: g.id,
-                      child: Text((g.active ? g.name : '${g.name} (غیرفعال)') +
-                          ' (${_fa(_groupCounts[g.id] ?? 0)})'))),
+              ..._groups.map((g) =>
+                  DropdownMenuItem<int?>(value: g.id, child: Text(g.active ? g.name : '${g.name} (غیرفعال)'))),
             ],
             onChanged: (v) => setState(() => _groupId = v),
           ),
